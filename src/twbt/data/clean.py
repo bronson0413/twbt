@@ -73,21 +73,44 @@ def clean_prices(raw: pd.DataFrame) -> pd.DataFrame:
 # -- monthly revenue --------------------------------------------------------
 
 
-def revenue_available_date(year: pd.Series, month: pd.Series) -> pd.Series:
+def next_trading_day_after(
+    dates: pd.Series, trading_days: pd.DatetimeIndex | None, inclusive: bool = False
+) -> pd.Series:
+    """First trading day after each date (or on/after it if ``inclusive``).
+
+    Without a calendar, or past its end, falls back to the next calendar day.
+    """
+    fallback = dates if inclusive else dates + pd.Timedelta(days=1)
+    if trading_days is None or len(trading_days) == 0:
+        return fallback
+    td = trading_days.sort_values().to_numpy()
+    idx = np.searchsorted(td, dates.to_numpy(), side="left" if inclusive else "right")
+    in_range = (idx < len(td)) & dates.notna().to_numpy()
+    out = fallback.copy()
+    out[in_range] = td[idx[in_range]]
+    return out
+
+
+def revenue_available_date(
+    year: pd.Series, month: pd.Series, trading_days: pd.DatetimeIndex | None = None
+) -> pd.Series:
     """Earliest date we allow a backtest to use revenue for (year, month).
 
-    The legal deadline is the 10th of the following month, so the number is
-    only known for sure from the 11th. Using an earlier date for companies that
-    happened to publish early would make the backtest look better than what a
-    systematic monthly process could actually do.
+    The legal deadline is the 10th of the following month, extended to the
+    next business day when the 10th is a holiday (e.g. 10/10 National Day, or
+    a weekend). The number is only known for sure from the trading day after
+    that. Using an earlier date for companies that happened to publish early
+    would make the backtest look better than a systematic monthly process can.
     """
     nxt = pd.to_datetime(
         {"year": year.astype(int), "month": month.astype(int), "day": 1}
     ) + pd.DateOffset(months=1)
-    return nxt + pd.Timedelta(days=REVENUE_DEADLINE_DAY)
+    deadline = nxt + pd.Timedelta(days=REVENUE_DEADLINE_DAY - 1)
+    deadline = next_trading_day_after(deadline, trading_days, inclusive=True)
+    return next_trading_day_after(deadline, trading_days)
 
 
-def clean_revenue(raw: pd.DataFrame) -> pd.DataFrame:
+def clean_revenue(raw: pd.DataFrame, trading_days: pd.DatetimeIndex | None = None) -> pd.DataFrame:
     cols = ["stock_id", "period", "revenue_year", "revenue_month", "revenue", "available_date"]
     if raw.empty:
         return pd.DataFrame(columns=cols)
@@ -102,15 +125,16 @@ def clean_revenue(raw: pd.DataFrame) -> pd.DataFrame:
     df["period"] = pd.to_datetime(
         {"year": df["revenue_year"], "month": df["revenue_month"], "day": 1}
     ).dt.to_period("M")
-    available = revenue_available_date(df["revenue_year"], df["revenue_month"])
+    available = revenue_available_date(df["revenue_year"], df["revenue_month"], trading_days)
 
     # Late filers: if FinMind first saw the row after the deadline, the market
     # couldn't have used it earlier either. create_time is a date with no time,
-    # so we assume it arrived after the close and allow it from the next day.
+    # so we assume it arrived after the close and allow it from the next
+    # trading day.
     if "create_time" in raw.columns:
         ct = pd.to_datetime(raw["create_time"], errors="coerce")  # "" → NaT
         ct = ct.where(ct != CREATE_TIME_BACKFILL_DATE)
-        late = ct + pd.Timedelta(days=1)
+        late = next_trading_day_after(ct, trading_days)
         available = available.where(~(late > available), late)
 
     df["available_date"] = available
@@ -219,7 +243,7 @@ def build(root: str | Path, since: str = "2010-01-01") -> dict[str, int]:
         else pd.DataFrame(columns=["date"])
     )
     prices = clean_prices(raw.read_all(PRICE))
-    revenue = clean_revenue(raw.read_all(MONTH_REVENUE))
+    revenue = clean_revenue(raw.read_all(MONTH_REVENUE), pd.DatetimeIndex(tdays["date"]))
     actions = clean_corporate_actions(
         raw.read_all(DIVIDEND_RESULT),
         raw.read_all(CAPITAL_REDUCTION),

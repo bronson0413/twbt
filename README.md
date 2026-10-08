@@ -22,6 +22,12 @@ twbt build
 
 之後每月更新一次，只抓新資料。
 
+**不用自己的電腦：GitHub Actions**
+
+`.github/workflows/data.yml` 會在 GitHub 的機器上每 6 小時跑一次下載，每次跑約 5 小時後自動停下，進度存在 Actions cache，下次接著跑。第一次完整下載約需 3–4 次執行，之後大約每 25 天更新一次。整理好的 clean 資料會上傳成 `clean-data` artifact。
+
+設定：repo 設為 private（FinMind 授權不允許再散布資料），在 Settings → Secrets and variables → Actions 新增 `FINMIND_TOKEN`。
+
 ```python
 from twbt.data.query import Data
 
@@ -51,8 +57,8 @@ FinMind API ──► raw/（原樣保存，只追加）──► clean/（可�
 - 興櫃轉上市櫃的股票在 FinMind 有兩列，取最新那列
 
 **避免 look-ahead**
-- 月營收的 `available_date` = 次月 11 日（法定期限 10 日）。公司提早公布也不提前使用，讓整段歷史用同一條規則
-- FinMind 自 2026-04-21 起有 `create_time`。晚於期限才出現的資料，改用 `create_time` 隔天
+- 月營收的 `available_date` = 申報期限後的下一個交易日。期限是次月 10 日，遇假日順延（例如 10/10 國慶、週末）。公司提早公布也不提前使用，讓整段歷史用同一條規則
+- FinMind 自 2026-04-21 起有 `create_time`。晚於期限才出現的資料，改用 `create_time` 後的下一個交易日
 - 策略只能透過 `revenue_asof(date)` 取得營收，結構上碰不到未公布的資料
 
 **價格與公司行動**
@@ -67,7 +73,7 @@ FinMind API ──► raw/（原樣保存，只追加）──► clean/（可�
 - **現金股利視為除息日再投入**：沒有模擬除息日到發放日之間的現金空窗
 - **已下市股票的市場別未知**：FinMind 的股票清單只有現存股票
 - **代號重複使用**：已下市代號被新公司使用時，視為現存公司，舊公司的資料會混在同一個代號下
-- 以上資料欄位依 FinMind 文件撰寫，第一次實際下載時請先用 `--stocks` 小量驗證
+- 價格、月營收、除權息三個資料集的欄位已用 2330 的實際 API 回應確認（2026-10-08）；其餘依 FinMind 文件
 
 ## 測試
 

@@ -1,0 +1,62 @@
+# Downloads FinMind data on GitHub's machines, so no local computer is needed.
+#
+# * Runs every 6 hours. Each run downloads for up to ~5.3 hours, then stops
+#   cleanly; progress is kept in the Actions cache and the next run resumes.
+#   The first full download therefore takes about 3–4 runs.
+# * After that, --min-age-hours 600 makes runs no-ops until data is ~25 days
+#   old, i.e. one refresh a month (enough for monthly rebalancing).
+# * The clean layer is uploaded as the `clean-data` artifact after every run.
+#
+# Setup: Settings → Secrets and variables → Actions → New secret FINMIND_TOKEN.
+# Keep this repo private: FinMind's licence does not allow redistributing data.
+
+name: data
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+
+      - name: Restore raw data
+        uses: actions/cache/restore@v4
+        with:
+          path: data/raw
+          key: raw-${{ github.run_id }}
+          restore-keys: raw-
+
+      - name: Download (stops itself before the job time limit)
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: timeout --signal=INT 320m twbt update --min-age-hours 600 || echo "stopped, will resume"
+
+      - name: Save raw data
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/raw
+          key: raw-${{ github.run_id }}
+
+      - run: twbt status
+      - run: twbt build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clean-data
+          path: data/clean
+          retention-days: 30

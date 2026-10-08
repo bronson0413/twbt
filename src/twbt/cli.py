@@ -27,7 +27,8 @@ def cmd_update(args: argparse.Namespace) -> int:
         return 2
     root = _data_dir(args.data_dir)
     client = FinMindClient.from_token(token, calls_per_hour=args.calls_per_hour)
-    updater = Updater(client, RawStore(root), Manifest(root), start=args.start, end=args.end)
+    updater = Updater(client, RawStore(root), Manifest(root), start=args.start, end=args.end,
+                      min_age_hours=args.min_age_hours)
     datasets = [BY_NAME[n] for n in args.datasets] if args.datasets else PER_STOCK_DATASETS
     stocks = args.stocks.split(",") if args.stocks else None
     report = updater.run(datasets=datasets, stocks=stocks)
@@ -69,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--datasets", nargs="+", choices=sorted(BY_NAME))
     u.add_argument("--stocks", help="comma-separated ids, e.g. 2330,2317 (for a quick test)")
     u.add_argument("--calls-per-hour", type=int, default=550)
+    u.add_argument("--min-age-hours", type=float, default=12.0,
+                   help="skip anything fetched more recently than this (default 12)")
     u.set_defaults(func=cmd_update)
 
     sub.add_parser("build", help="rebuild the clean layer from raw").set_defaults(func=cmd_build)

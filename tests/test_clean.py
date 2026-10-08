@@ -32,6 +32,31 @@ def test_create_time_backfill_placeholder_is_ignored():
     assert df.loc[0, "available_date"] == pd.Timestamp("2025-02-11")
 
 
+def test_deadline_on_holiday_is_extended():
+    # 2026-10-10 is National Day (Saturday); companies may publish on Mon 10-12
+    tdays = pd.DatetimeIndex(["2026-10-08", "2026-10-09", "2026-10-12", "2026-10-13"])
+    df = clean_revenue(pd.DataFrame([rev(2026, 9)]), tdays)
+    assert df.loc[0, "available_date"] == pd.Timestamp("2026-10-13")
+
+
+def test_available_date_lands_on_trading_day():
+    # 2024-03-10 is a Sunday → deadline Mon 03-11 → usable Tue 03-12
+    tdays = pd.DatetimeIndex(["2024-03-08", "2024-03-11", "2024-03-12"])
+    df = clean_revenue(pd.DataFrame([rev(2024, 2)]), tdays)
+    assert df.loc[0, "available_date"] == pd.Timestamp("2024-03-12")
+
+
+def test_real_tsmc_rows_from_finmind():
+    # Actual API rows (2026-10-08 fetch). 05-10 is a Sunday → deadline Mon 05-11.
+    # June create_time is Mon 07-13 although
+    # the deadline was Fri 07-10, so we wait for Tue 07-14 (conservative).
+    tdays = pd.bdate_range("2026-05-01", "2026-07-31")
+    df = clean_revenue(pd.DataFrame([rev(2026, 4, "2026-05-08"), rev(2026, 6, "2026-07-13")]),
+                       tdays)
+    assert df["available_date"].tolist() == [pd.Timestamp("2026-05-12"),
+                                             pd.Timestamp("2026-07-14")]
+
+
 def test_zero_price_days_become_nan():
     raw = pd.DataFrame([
         {"date": "2025-07-29", "stock_id": "2317", "Trading_Volume": 10, "Trading_money": 1715,
