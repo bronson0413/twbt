@@ -6,6 +6,8 @@
 # * After that, --min-age-hours 600 makes runs no-ops until data is ~25 days
 #   old, i.e. one refresh a month (enough for monthly rebalancing).
 # * The clean layer is uploaded as the `clean-data` artifact after every run.
+# * The backtest summary and this month's target portfolio are written to the
+#   run's summary page, readable from a phone.
 #
 # Setup: Settings → Secrets and variables → Actions → New secret FINMIND_TOKEN.
 # Keep this repo private: FinMind's licence does not allow redistributing data.
@@ -54,6 +56,11 @@ jobs:
 
       - run: twbt status
       - run: twbt build
+
+      - name: Backtest and this month's signal (shown on the run's summary page)
+        continue-on-error: true
+        run: |
+          { echo '```'; twbt backtest; echo; twbt signal; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:

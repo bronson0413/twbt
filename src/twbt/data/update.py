@@ -10,11 +10,22 @@ from datetime import date, datetime, timedelta, timezone
 import pandas as pd
 
 from .client import FinMindClient, FinMindError
-from .datasets import DELISTING, GLOBAL_DATASETS, PER_STOCK_DATASETS, STOCK_INFO, DatasetSpec
+from .datasets import (
+    DELISTING,
+    DIVIDEND_RESULT,
+    GLOBAL_DATASETS,
+    PER_STOCK_DATASETS,
+    PRICE,
+    STOCK_INFO,
+    DatasetSpec,
+)
 from .store import GLOBAL_KEY, Manifest, RawStore
 from .universe import build_universe
 
 log = logging.getLogger(__name__)
+
+BENCHMARKS: tuple[str, ...] = ("0050",)
+BENCHMARK_DATASETS = (PRICE, DIVIDEND_RESULT)
 
 
 @dataclass
@@ -40,7 +51,9 @@ class Updater:
         min_age_hours: float = 12.0,
         max_consecutive_failures: int = 5,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        benchmarks: tuple[str, ...] = BENCHMARKS,
     ) -> None:
+        self.benchmarks = benchmarks
         self.client = client
         self.store = store
         self.manifest = manifest
@@ -135,14 +148,22 @@ class Updater:
         delisted = dict(zip(uni["stock_id"], uni["delisted_date"].notna(), strict=True))
         datasets = list(datasets)
 
+        jobs = [(sid, spec, delisted[sid]) for sid in uni["stock_id"] for spec in datasets]
+        # Benchmarks (ETFs) are outside the stock universe but needed for
+        # comparison: prices and dividends only.
+        jobs += [
+            (sid, spec, False)
+            for sid in self.benchmarks
+            for spec in datasets
+            if spec in BENCHMARK_DATASETS
+        ]
         tasks: list[tuple[DatasetSpec, str, str]] = []
-        for sid in uni["stock_id"]:
-            for spec in datasets:
-                start = self.plan(spec, sid, delisted[sid])
-                if start is None:
-                    report.skipped += 1
-                else:
-                    tasks.append((spec, sid, start))
+        for sid, spec, is_delisted in jobs:
+            start = self.plan(spec, sid, is_delisted)
+            if start is None:
+                report.skipped += 1
+            else:
+                tasks.append((spec, sid, start))
 
         per_hour = self.client._limiter.max_calls  # noqa: SLF001 - for ETA only
         log.info(

@@ -1,4 +1,4 @@
-"""Command line: ``twbt update`` / ``twbt build`` / ``twbt status``."""
+"""Command line: ``twbt update | build | status | backtest | signal``."""
 
 from __future__ import annotations
 
@@ -13,6 +13,9 @@ from .data.client import FinMindClient
 from .data.datasets import BY_NAME, PER_STOCK_DATASETS
 from .data.store import Manifest, RawStore
 from .data.update import Updater
+from .runner import Settings, format_summary
+from .runner import backtest as run_bt
+from .runner import signal as run_signal
 
 
 def _data_dir(arg: str | None) -> Path:
@@ -58,6 +61,59 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _settings(args: argparse.Namespace) -> Settings:
+    s = Settings(capital=args.capital, top_n=args.top_n, months=args.months,
+                 min_avg_value=args.min_avg_value, rebalance_day=args.rebalance_day,
+                 commission_discount=args.discount, min_commission=args.min_fee,
+                 slippage=args.slippage, lot_size=args.lot,
+                 delist_recovery=getattr(args, "delist_recovery", 1.0))
+    s.start = getattr(args, "bt_start", args.start)
+    if args.end:
+        s.end = args.end
+    return s
+
+
+def cmd_backtest(args: argparse.Namespace) -> int:
+    root = _data_dir(args.data_dir)
+    strat, bench = run_bt(root, _settings(args))
+    print(format_summary(strat, bench))
+    out = root / "results"
+    out.mkdir(parents=True, exist_ok=True)
+    eq = strat.equity.to_frame("strategy").join(bench.equity.rename("benchmark"))
+    eq.to_csv(out / "equity.csv")
+    strat.trades.to_csv(out / "trades.csv", index=False)
+    strat.monthly_returns().to_csv(out / "monthly_returns.csv")
+    print(f"\n明細存在 {out}/（equity.csv、trades.csv、monthly_returns.csv）")
+    return 0
+
+
+def cmd_signal(args: argparse.Namespace) -> int:
+    table = run_signal(_data_dir(args.data_dir), _settings(args))
+    print(f"資料日期 {table.attrs['date']}，資金 {args.capital:,.0f} 的目標持股：")
+    if table.empty:
+        print("（沒有符合條件的股票，全部持有現金）")
+        return 0
+    print(table.to_string(index=False, formatters={
+        "weight": "{:.1%}".format, "close": "{:,.2f}".format, "value": "{:,.0f}".format}))
+    print(f"合計 {table['value'].sum():,.0f}，剩餘現金 {args.capital - table['value'].sum():,.0f}")
+    return 0
+
+
+def _strategy_args(sp: argparse.ArgumentParser) -> None:
+    sp.add_argument("--end", help="default: today")
+    sp.add_argument("--capital", type=float, default=250_000)
+    sp.add_argument("--top-n", type=int, default=8, help="number of stocks to hold")
+    sp.add_argument("--months", type=int, default=3, help="months of YoY growth to average")
+    sp.add_argument("--min-avg-value", type=float, default=10_000_000,
+                    help="min 20-day average traded value, NT$")
+    sp.add_argument("--rebalance-day", type=int, default=11)
+    sp.add_argument("--discount", type=float, default=1.0, help="commission discount, 0.28 = 2.8折")
+    sp.add_argument("--min-fee", type=float, default=20.0)
+    sp.add_argument("--slippage", type=float, default=0.001)
+    sp.add_argument("--lot", type=int, default=1, choices=[1, 1000],
+                    help="1 = odd lots, 1000 = board lots only")
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="twbt")
     p.add_argument("--data-dir", help="default: $TWBT_DATA_DIR or ./data")
@@ -76,6 +132,17 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("build", help="rebuild the clean layer from raw").set_defaults(func=cmd_build)
     sub.add_parser("status", help="show download progress").set_defaults(func=cmd_status)
+
+    b = sub.add_parser("backtest", help="monthly revenue momentum vs 0050")
+    _strategy_args(b)
+    b.add_argument("--from", dest="bt_start", default="2012-01-01",
+                   help="backtest start; revenue YoY needs ~15 months of history before it")
+    b.add_argument("--delist-recovery", type=float, default=1.0)
+    b.set_defaults(func=cmd_backtest)
+
+    g = sub.add_parser("signal", help="this month's target portfolio (for paper trading)")
+    _strategy_args(g)
+    g.set_defaults(func=cmd_signal)
 
     args = p.parse_args(argv)
     logging.basicConfig(

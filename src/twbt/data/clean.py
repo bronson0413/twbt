@@ -124,7 +124,7 @@ def clean_revenue(raw: pd.DataFrame, trading_days: pd.DatetimeIndex | None = Non
     )
     df["period"] = pd.to_datetime(
         {"year": df["revenue_year"], "month": df["revenue_month"], "day": 1}
-    ).dt.to_period("M")
+    ).dt.strftime("%Y-%m")  # plain string: portable through parquet and DuckDB
     available = revenue_available_date(df["revenue_year"], df["revenue_month"], trading_days)
 
     # Late filers: if FinMind first saw the row after the deadline, the market

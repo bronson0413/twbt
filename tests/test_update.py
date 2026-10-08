@@ -24,10 +24,12 @@ def test_full_run_fetches_every_stock_once(server, tmp_path, fixed_now):
     up = make_updater(server, tmp_path, fixed_now)
     report = up.run()
     assert not report.failed
-    # universe: 2330, 1294, 9999 → one call per stock per dataset
+    # universe 2330, 1294, 9999 + benchmark 0050 → one call per stock per dataset
     assert sorted(r["data_id"] for r in per_stock_requests(server, PRICE.name)) == [
-        "1294", "2330", "9999"
+        "0050", "1294", "2330", "9999"
     ]
+    # benchmark gets prices and dividends only, no revenue
+    assert "0050" not in {r["data_id"] for r in per_stock_requests(server, MONTH_REVENUE.name)}
     assert RawStore(tmp_path).read(PRICE, "2330")["close"].tolist() == [800.0, 0.0]
 
 
@@ -80,4 +82,4 @@ def test_single_failure_is_recorded_and_run_continues(server, tmp_path, fixed_no
     server.fail_on = {(PRICE.name, "1294")}
     report = make_updater(server, tmp_path, fixed_now).run(datasets=[PRICE])
     assert [(d, k) for d, k, _ in report.failed] == [(PRICE.name, "1294")]
-    assert Manifest(tmp_path).keys(PRICE.name) == {"2330", "9999"}  # retried next run
+    assert Manifest(tmp_path).keys(PRICE.name) == {"0050", "2330", "9999"}  # retried next run

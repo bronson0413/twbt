@@ -86,13 +86,17 @@ def server() -> FakeFinMind:
         "TaiwanStockTradingDate": [
             {"date": d} for d in ["2015-05-29", "2015-06-01", "2024-04-10", "2024-04-11"]
         ],
-        "TaiwanStockSplitPrice": [],
+        "TaiwanStockSplitPrice": [
+            {"date": "2025-06-18", "stock_id": "0050", "type": "分割", "before_price": 188.65,
+             "after_price": 47.16, "max_price": 51.85, "min_price": 42.45, "open_price": 47.16},
+        ],
         "TaiwanStockParValueChange": [],
         "TaiwanStockPrice": [
             price_row("2330", "2024-04-10", 800.0),
             price_row("2330", "2024-04-11", 0.0, vol=0),  # no published price
             price_row("1294", "2024-04-10", 50.0),
             price_row("9999", "2015-05-29", 10.0),
+            price_row("0050", "2024-04-10", 150.0),
         ],
         "TaiwanStockMonthRevenue": [
             {"date": "2024-04-01", "stock_id": "2330", "country": "Taiwan",
