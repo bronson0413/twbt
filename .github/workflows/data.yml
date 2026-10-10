@@ -105,7 +105,7 @@ jobs:
                     TaiwanStockInstitutionalInvestorsBuySell TaiwanStockDividendResult
                     TaiwanStockCapitalReductionReferencePrice" ;;
             orders)
-              args="--min-age-hours 120 --datasets TaiwanStockMonthRevenue" ;;
+              args="--min-age-hours 20 --datasets TaiwanStockMonthRevenue" ;;
             status)
               ids=$(python -c "import json;print(','.join(h['stock_id'] for h in json.load(open('prev/latest.json'))['holdings']))" 2>/dev/null || true)
               if [ -z "$ids" ]; then echo "no holdings yet"; exit 0; fi
