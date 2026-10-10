@@ -43,12 +43,23 @@ CAPITAL_REDUCTION = DatasetSpec(
     "TaiwanStockCapitalReductionReferencePrice", per_stock=True, key=("stock_id", "date")
 )
 
+# Daily P/E, P/B and dividend yield as published by the exchange after each
+# close. The exchange computes them from earnings already reported on that
+# day, so they are point-in-time.
+VALUATION = DatasetSpec("TaiwanStockPER", per_stock=True, key=("stock_id", "date"))
+# Daily buy/sell in shares per investor type (foreign, investment trust, dealers).
+INSTITUTIONAL = DatasetSpec(
+    "TaiwanStockInstitutionalInvestorsBuySell", per_stock=True, key=("stock_id", "date", "name")
+)
+
 GLOBAL_DATASETS: tuple[DatasetSpec, ...] = (STOCK_INFO, DELISTING, TRADING_DATE, SPLIT, PAR_VALUE)
 PER_STOCK_DATASETS: tuple[DatasetSpec, ...] = (
     PRICE,
     MONTH_REVENUE,
     DIVIDEND_RESULT,
     CAPITAL_REDUCTION,
+    VALUATION,
+    INSTITUTIONAL,
 )
 
 BY_NAME: dict[str, DatasetSpec] = {d.name: d for d in GLOBAL_DATASETS + PER_STOCK_DATASETS}
