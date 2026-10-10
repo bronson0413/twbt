@@ -27,6 +27,7 @@ import pandas as pd
 from ..data.query import Data
 from ..engine import BacktestConfig, CostModel, MarketData, Result, run_backtest
 from ..engine.context import Context
+from ..engine.costs import ZERO_COST
 from ..engine.metrics import max_drawdown
 from ..engine.schedule import monthly_on_or_after
 from ..strategies import (
@@ -174,7 +175,10 @@ def run_study(data: Data, cfg: StudyConfig, log: Callable[[str], None] = print) 
         log(f"backtest {name} top{cfg.main_n}")
         portfolios[name] = bt(top_n(f, cfg.main_n, cfg.min_avg_value, name=name), cfg.costs)
     log("backtest baselines")
-    portfolios["EQUAL"] = bt(equal_weight(cfg.min_avg_value), cfg.costs)
+    # The equal-weight universe is an index, not a portfolio a NT$250k account
+    # could hold: ~800 names at the NT$20 minimum fee would cost ~7% per trade.
+    # It is therefore computed without costs, which makes it a harder baseline.
+    portfolios["EQUAL"] = bt(equal_weight(cfg.min_avg_value), ZERO_COST)
     portfolios[BENCHMARK] = bt(buy_and_hold(BENCHMARK), cfg.costs)
 
     ins_sharpe = {n: curve_stats(split_curve(portfolios[n].equity, split)[0])["sharpe"]

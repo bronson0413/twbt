@@ -195,8 +195,8 @@ def _yearly_table(n: dict) -> str:
     ys = n["yearly_spread"]
     head = "| " + " | ".join(str(y) for y in ys) + " |"
     sep = "|" + "---|" * len(ys)
-    body = "| " + " | ".join(pct(v, True, 0) for v in ys.values()) + " |"
-    pos = sum(v > 0 for v in ys.values())
+    body = "| " + " | ".join(pct(v, True, 1) for v in ys.values()) + " |"
+    pos = sum(v > 0.0005 for v in ys.values())
     return f"{head}\n{sep}\n{body}\n\n{len(ys)} 年中有 {pos} 年 Q5 勝過 Q1。"
 
 
@@ -288,8 +288,9 @@ def write_report(res: StudyResult, n: dict, out: Path) -> None:
 
 {_portfolio_table(n, names)}
 
-「對全體等權重的超額報酬」是相對於同一股票池、同樣成本的等權重組合，
-是判斷選股能力的主要基準。0050 約一半是台積電，主要反映大型權值股的表現，作為參考。
+「對全體等權重的超額報酬」是相對於同一股票池的等權重指數。這個指數**不計任何成本**
+（以 25 萬本金持有約 800 檔、每筆最低手續費 20 元，實際上無法交易），
+所以是比含成本組合更嚴格的基準，是判斷選股能力的主要依據。0050 約一半是台積電，主要反映大型權值股的表現，作為參考。
 
 ## 5. 穩健性
 

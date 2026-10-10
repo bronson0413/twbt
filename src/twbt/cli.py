@@ -8,6 +8,8 @@ import os
 import sys
 from pathlib import Path
 
+import numpy as np
+
 from .data.clean import build
 from .data.client import FinMindClient
 from .data.datasets import BY_NAME, PER_STOCK_DATASETS
@@ -109,6 +111,27 @@ def cmd_research(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_audit(args: argparse.Namespace) -> int:
+    from .engine import MarketData
+    from .research.audit import impossible_moves, stock_summary
+
+    data = Data(_data_dir(args.data_dir))
+    end = args.end or str(data.sql("SELECT MAX(date) AS d FROM prices")["d"].iloc[0].date())
+    market = MarketData.from_data(data, args.start, end, lookback_days=0)
+    bad = impossible_moves(market)
+    n_days = int((~np.isnan(market.close)).sum())
+    print(f"超過漲跌幅限制、且當天沒有公司行動的價格變動：{len(bad)} 筆"
+          f"（全部 {n_days:,} 個股票日）")
+    if len(bad):
+        print(bad.groupby(bad["date"].dt.year).size().rename("筆數").to_string())
+        print(bad.head(args.top).to_string(index=False, formatters={
+            "move": "{:+.1%}".format}))
+    for sid in args.stocks.split(","):
+        if sid in market.col:
+            print(stock_summary(market, sid, args.check_from, end))
+    return 0
+
+
 def cmd_signal(args: argparse.Namespace) -> int:
     table = run_signal(_data_dir(args.data_dir), _settings(args))
     print(f"資料日期 {table.attrs['date']}，資金 {args.capital:,.0f} 的目標持股：")
@@ -182,6 +205,13 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--end", help="default: last price date")
     r.add_argument("--out", default="docs/research")
     r.set_defaults(func=cmd_research)
+
+    a = sub.add_parser("audit", help="find impossible price moves; spot-check stocks")
+    a.add_argument("--end")
+    a.add_argument("--top", type=int, default=30)
+    a.add_argument("--stocks", default="0050,2330")
+    a.add_argument("--check-from", default="2023-01-03")
+    a.set_defaults(func=cmd_audit)
 
     g = sub.add_parser("signal", help="this month's target portfolio (for paper trading)")
     _strategy_args(g)
