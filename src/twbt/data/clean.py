@@ -67,7 +67,28 @@ def clean_prices(raw: pd.DataFrame) -> pd.DataFrame:
     df["has_quote"] = df["close"] > 0
     for c in ("open", "high", "low", "close"):
         df.loc[~df["has_quote"], c] = np.nan
+        # e.g. 興櫃 first-day open is 0 even when there is a close
+        df.loc[df[c] <= 0, c] = np.nan
     return df.sort_values(["stock_id", "date"]).reset_index(drop=True)[cols]
+
+
+def drop_emerging_period(prices: pd.DataFrame, universe: pd.DataFrame) -> pd.DataFrame:
+    """Remove 興櫃-era rows of stocks that later listed (up to and including the switch date).
+
+    Keeping them would let a backtest trade a stock before it was listed and,
+    worse, only stocks that *did* list later — a survivorship bias.
+    """
+    if prices.empty or "emerging_until" not in universe:
+        return prices
+    cutoff = universe.set_index("stock_id")["emerging_until"].dropna()
+    if cutoff.empty:
+        return prices
+    until = prices["stock_id"].map(cutoff)
+    keep = until.isna() | (prices["date"] > until)
+    dropped = int((~keep).sum())
+    if dropped:
+        log.info("dropped %d 興櫃-period price rows", dropped)
+    return prices[keep].reset_index(drop=True)
 
 
 # -- monthly revenue --------------------------------------------------------
@@ -242,7 +263,7 @@ def build(root: str | Path, since: str = "2010-01-01") -> dict[str, int]:
         if not tdays.empty
         else pd.DataFrame(columns=["date"])
     )
-    prices = clean_prices(raw.read_all(PRICE))
+    prices = drop_emerging_period(clean_prices(raw.read_all(PRICE)), universe)
     revenue = clean_revenue(raw.read_all(MONTH_REVENUE), pd.DatetimeIndex(tdays["date"]))
     actions = clean_corporate_actions(
         raw.read_all(DIVIDEND_RESULT),

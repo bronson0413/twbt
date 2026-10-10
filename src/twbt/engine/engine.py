@@ -128,7 +128,7 @@ class _Book:
         for sid, w in weights.items():
             target_w[m.col[sid]] = w
 
-        tradable = ~np.isnan(o)
+        tradable = ~np.isnan(o) & (np.nan_to_num(o) > 0)
         thr = 0.095 if date >= LIMIT_CHANGE_DATE else 0.065
         with np.errstate(invalid="ignore"):
             locked = tradable & (o == hi) & (o == lo)
@@ -139,6 +139,8 @@ class _Book:
         target = self.shares.copy()
         for col in np.flatnonzero(tradable):
             want = target_w[col] * equity / c.buy_price(o[col])
+            if not np.isfinite(want):
+                continue
             target[col] = math.floor(want / lot) * lot
 
         # sells first, to raise cash

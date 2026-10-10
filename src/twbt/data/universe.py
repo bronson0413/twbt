@@ -28,30 +28,39 @@ LISTED_MARKETS = {"twse", "tpex"}
 
 
 def build_universe(info: pd.DataFrame, delisting: pd.DataFrame, since: str) -> pd.DataFrame:
-    """Return one row per stock: stock_id, stock_name, industry, market, delisted_date.
+    """One row per stock: stock_id, stock_name, industry, market, delisted_date, emerging_until.
 
     ``since``: delisted stocks that left before this date can't appear in the
     backtest, so we don't spend API calls on them.
+
+    ``emerging_until``: for stocks that moved from 興櫃 to 上市/上櫃, the date
+    their 興櫃 row stops. Prices up to then are 興櫃 quotes (negotiated, often
+    not tradable for retail) and must not be used as if the stock were listed.
     """
-    cols = ["stock_id", "stock_name", "industry", "market", "delisted_date"]
+    cols = ["stock_id", "stock_name", "industry", "market", "delisted_date", "emerging_until"]
 
     current = pd.DataFrame(columns=cols)
     if not info.empty:
         df = info.copy()
         df["date"] = pd.to_datetime(df["date"])
+        df["stock_id"] = df["stock_id"].astype(str)
+        emerging_until = df[df["type"] == "emerging"].groupby("stock_id")["date"].max()
         # A stock that moved from 興櫃 to 上市/上櫃 keeps both rows; the row with
         # the latest date is its current market (per FinMind docs).
         df = df.sort_values("date").drop_duplicates("stock_id", keep="last")
         df = df[df["type"].isin(LISTED_MARKETS)]
         df = df[~df["industry_category"].isin(EXCLUDED_INDUSTRIES)]
-        df = df[df["stock_id"].astype(str).str.match(COMMON_STOCK_ID)]
+        df = df[df["stock_id"].str.match(COMMON_STOCK_ID)]
+        # 創新板 (Taiwan Innovation Board) is limited to qualified investors.
+        df = df[~df["stock_name"].astype(str).str.endswith("-創")]
         current = pd.DataFrame(
             {
-                "stock_id": df["stock_id"].astype(str),
+                "stock_id": df["stock_id"],
                 "stock_name": df["stock_name"],
                 "industry": df["industry_category"],
                 "market": df["type"],
                 "delisted_date": pd.NaT,
+                "emerging_until": pd.to_datetime(df["stock_id"].map(emerging_until.to_dict())),
             }
         )
 
@@ -71,6 +80,7 @@ def build_universe(info: pd.DataFrame, delisting: pd.DataFrame, since: str) -> p
                 "industry": pd.NA,
                 "market": "unknown",
                 "delisted_date": d["date"],
+                "emerging_until": pd.NaT,
             }
         )
         # A code that is delisted but also currently listed was reused or

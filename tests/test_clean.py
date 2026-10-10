@@ -123,3 +123,22 @@ def test_adjusted_close_compounds_multiple_events():
         pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
     )
     assert adjusted_close(prices, ev).tolist() == pytest.approx([25.0, 25.0, 25.0])
+
+
+def test_zero_open_with_valid_close_becomes_nan():
+    raw = pd.DataFrame([{"date": "2023-10-17", "stock_id": "8272", "Trading_Volume": 10,
+                         "Trading_money": 1300, "open": 0, "max": 136, "min": 112.5,
+                         "close": 130}])
+    px = clean_prices(raw)
+    assert np.isnan(px.loc[0, "open"]) and px.loc[0, "close"] == 130
+
+
+def test_emerging_period_prices_dropped():
+    from twbt.data.clean import drop_emerging_period
+    px = pd.DataFrame({"stock_id": ["1294"] * 3 + ["2330"],
+                       "date": pd.to_datetime(["2024-09-24", "2024-09-25", "2024-09-26",
+                                               "2024-09-24"])})
+    uni = pd.DataFrame({"stock_id": ["1294", "2330"],
+                        "emerging_until": [pd.Timestamp("2024-09-25"), pd.NaT]})
+    out = drop_emerging_period(px, uni)
+    assert out["date"].dt.strftime("%m-%d").tolist() == ["09-26", "09-24"]

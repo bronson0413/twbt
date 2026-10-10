@@ -26,3 +26,14 @@ def test_reused_code_counts_as_current():
     uni = build_universe(info, delisting, since="2010-01-01")
     assert len(uni) == 1
     assert pd.isna(uni.loc[0, "delisted_date"])
+
+
+def test_emerging_until_and_innovation_board(server):
+    info = pd.DataFrame(server.tables["TaiwanStockInfo"] + [
+        {"industry_category": "電子工業", "stock_id": "7740", "stock_name": "熙特爾-創",
+         "type": "twse", "date": "2026-10-07"},
+    ])
+    uni = build_universe(info, pd.DataFrame(), since="2010-01-01").set_index("stock_id")
+    assert uni.loc["1294", "emerging_until"] == pd.Timestamp("2024-09-25")
+    assert pd.isna(uni.loc["2330", "emerging_until"])
+    assert "7740" not in uni.index  # 創新板: qualified investors only

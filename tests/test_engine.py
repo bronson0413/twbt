@@ -220,3 +220,9 @@ def test_monthly_schedule():
     days = pd.bdate_range("2026-09-01", "2026-11-30")
     got = monthly_on_or_after(days, 11)
     assert [d.date().isoformat() for d in got] == ["2026-09-11", "2026-10-12", "2026-11-11"]
+
+
+def test_zero_open_is_not_tradable():
+    m = market({"A": [(0.0, 10, 10, 10), (0.0, 10, 10, 10), 10, 10, 10, 10]})
+    r = bt(m, hold({"A": 1.0}), rebalance=DAYS[:2], capital=1000)  # day-1 fill fails
+    assert r.trades.iloc[0]["date"] == DAYS[2]
