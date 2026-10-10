@@ -142,3 +142,49 @@ def test_emerging_period_prices_dropped():
                         "emerging_until": [pd.Timestamp("2024-09-25"), pd.NaT]})
     out = drop_emerging_period(px, uni)
     assert out["date"].dt.strftime("%m-%d").tolist() == ["09-26", "09-24"]
+
+
+def _px(closes, sid="A", start="2024-01-01"):
+    days = pd.bdate_range(start, periods=len(closes))
+    return pd.DataFrame({"date": days, "stock_id": sid, "close": closes}), days
+
+
+def test_unexplained_moves_become_value_neutral_fixes():
+    from twbt.data.clean import unexplained_moves
+    px, days = _px([10.0] * 6 + [241, 3.43, 238.5, 238.5])  # glitch day in the middle
+    px.loc[:5, "close"] = 241.0
+    fixes = unexplained_moves(px, pd.DataFrame(columns=["stock_id", "date", "factor"]), days)
+    assert fixes["date"].tolist() == [days[7], days[8]]
+    # applying both factors restores the original value: 241 → 241 × (241/3.43) × (3.43/238.5)
+    assert 3.43 * fixes["factor"].iloc[0] == pytest.approx(241)
+    assert (fixes["factor"].prod() * 238.5) == pytest.approx(241)
+
+
+def test_unexplained_moves_ignore_recorded_events_gaps_and_new_listings():
+    from twbt.data.clean import unexplained_moves
+    px, days = _px([10, 20, 40, 40, 40, 40, 40, 80.0, 80.0])  # first 5 days free
+    ev = pd.DataFrame({"stock_id": ["A"], "date": [days[7]], "factor": [0.5]})
+    assert unexplained_moves(px, ev, days).empty            # day 7 has an event
+    gap = px.drop(index=7).copy()
+    gap.loc[8, "close"] = 100.0
+    assert unexplained_moves(gap, ev.iloc[:0], days).empty  # across a missing day
+
+
+def test_build_includes_data_fixes(server, tmp_path, fixed_now):
+    from conftest import make_client, price_row
+
+    from twbt.data.clean import build
+    from twbt.data.store import Manifest, RawStore
+    from twbt.data.update import Updater
+    days = pd.bdate_range("2024-01-01", periods=8)
+    server.tables["TaiwanStockPrice"] += [
+        price_row("2330", d.date().isoformat(), c)
+        for d, c in zip(days, [50, 50, 50, 50, 50, 50, 100, 100], strict=True)]
+    server.tables["TaiwanStockTradingDate"] += [{"date": d.date().isoformat()} for d in days]
+    Updater(make_client(server), RawStore(tmp_path), Manifest(tmp_path), end="2026-10-08",
+            now=lambda: fixed_now["now"]).run()
+    build(tmp_path)
+    ev = pd.read_parquet(tmp_path / "clean" / "corporate_actions.parquet")
+    fix = ev[ev["kind"] == "data_fix"]
+    jan = fix[fix["date"] == days[6]]
+    assert len(jan) == 1 and jan["factor"].iloc[0] == pytest.approx(0.5)

@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from .data.clean import build
 from .data.client import FinMindClient
@@ -118,6 +119,11 @@ def cmd_audit(args: argparse.Namespace) -> int:
     data = Data(_data_dir(args.data_dir))
     end = args.end or str(data.sql("SELECT MAX(date) AS d FROM prices")["d"].iloc[0].date())
     market = MarketData.from_data(data, args.start, end, lookback_days=0)
+    fixes = data.sql("SELECT date, stock_id, detail FROM corporate_actions WHERE kind = 'data_fix'")
+    print(f"clean 層已中和的無法解釋跳動（data_fix）：{len(fixes)} 筆")
+    if len(fixes):
+        print(fixes.groupby(pd.to_datetime(fixes["date"]).dt.year).size().rename("筆數")
+              .to_string())
     bad = impossible_moves(market)
     n_days = int((~np.isnan(market.close)).sum())
     print(f"超過漲跌幅限制、且當天沒有公司行動的價格變動：{len(bad)} 筆"

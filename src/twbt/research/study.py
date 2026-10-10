@@ -131,6 +131,8 @@ class StudyResult:
     grid: pd.DataFrame
     selected: str
     last_date: pd.Timestamp
+    data_fixes: int = 0
+    stock_days: int = 0
 
 
 def run_study(data: Data, cfg: StudyConfig, log: Callable[[str], None] = print) -> StudyResult:
@@ -202,8 +204,12 @@ def run_study(data: Data, cfg: StudyConfig, log: Callable[[str], None] = print) 
                          "cagr_oos": curve_stats(oos)["cagr"],
                          "costs_total": res.summary()["total_costs"],
                          "turnover": res.summary()["turnover_per_year"]})
+    fixes = int(data.sql("SELECT COUNT(*) AS n FROM corporate_actions "
+                         "WHERE kind = 'data_fix' AND date >= ?", [pd.Timestamp(cfg.start)])
+                .iloc[0, 0])
+    stock_days = int(np.isfinite(market.close[market.index_of(cfg.start):]).sum())
     return StudyResult(cfg, factor, liquidity, portfolios, pd.DataFrame(rows), selected,
-                       market.dates[-1])
+                       market.dates[-1], fixes, stock_days)
 
 
 # -- numbers for the report -----------------------------------------------------
@@ -213,7 +219,8 @@ def collect(res: StudyResult) -> dict:
     split = pd.Timestamp(res.cfg.split)
     out: dict = {"selected": res.selected, "split": res.cfg.split,
                  "start": res.cfg.start, "last_date": str(res.last_date.date()),
-                 "main_n": res.cfg.main_n, "factor": {}, "liquidity": {}, "portfolio": {}}
+                 "main_n": res.cfg.main_n, "factor": {}, "liquidity": {}, "portfolio": {},
+                 "data_fixes": res.data_fixes, "stock_days": res.stock_days}
     for name, rep in res.factor.items():
         ins, oos = split_factor(rep, split)
         out["factor"][name] = {"full": rep.summary(), "is": ins.summary(), "oos": oos.summary()}

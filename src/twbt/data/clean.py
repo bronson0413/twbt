@@ -247,6 +247,64 @@ def adjusted_close(prices: pd.DataFrame, actions: pd.DataFrame) -> pd.Series:
     return prices["close"] * mult
 
 
+# -- data fixes ----------------------------------------------------------------
+
+LIMIT_CHANGE_DATE = pd.Timestamp("2015-06-01")
+NEW_LISTING_GRACE_DAYS = 5
+
+
+def unexplained_moves(
+    prices: pd.DataFrame,
+    actions: pd.DataFrame,
+    trading_days: pd.DatetimeIndex | None = None,
+    tolerance: float = 0.015,
+) -> pd.DataFrame:
+    """Day-over-day moves beyond the price limit with no corporate action that day.
+
+    Listed stocks can move at most ±10% a day (±7% before 2015-06-01), and new
+    listings are free for their first five sessions. Anything else beyond the
+    limit is a bad print or a missing event (capital reduction, par-value
+    change, split before the event tables start). Only consecutive trading
+    days are compared: a move across a suspension can legitimately compound
+    several limit moves.
+
+    Returns rows shaped like ``clean_corporate_actions`` output with
+    ``kind="data_fix"`` and ``factor = prev_close / close``: applied like any
+    other corporate action, they leave the holder's value unchanged, so the
+    jump is neither a gain nor a loss.
+    """
+    cols = ["date", "stock_id", "kind", "detail", "before_price", "reference_price", "factor"]
+    q = prices[prices["close"].notna()].sort_values(["stock_id", "date"])
+    if q.empty:
+        return pd.DataFrame(columns=cols)
+    if trading_days is None or len(trading_days) == 0:
+        trading_days = pd.DatetimeIndex(sorted(q["date"].unique()))
+    pos = pd.Series(np.arange(len(trading_days)), index=pd.DatetimeIndex(trading_days))
+    q = q.assign(pos=q["date"].map(pos))
+    g = q.groupby("stock_id")
+    q["prev_close"] = g["close"].shift(1)
+    q["prev_pos"] = g["pos"].shift(1)
+    q["nth"] = g.cumcount()
+    ev = (actions.groupby(["stock_id", "date"])["factor"].prod()
+          if not actions.empty else pd.Series(dtype=float))
+    key = pd.MultiIndex.from_arrays([q["stock_id"], q["date"]])
+    has_event = key.isin(ev.index) if len(ev) else np.zeros(len(q), dtype=bool)
+    limit = np.where(q["date"] >= LIMIT_CHANGE_DATE, 0.10, 0.07) + tolerance
+    move = q["close"] / q["prev_close"] - 1
+    bad = ((move.abs() > limit) & (q["pos"] - q["prev_pos"] == 1)
+           & (q["nth"] >= NEW_LISTING_GRACE_DAYS) & ~has_event)
+    b = q[bad]
+    return pd.DataFrame({
+        "date": b["date"].to_numpy(),
+        "stock_id": b["stock_id"].to_numpy(),
+        "kind": "data_fix",
+        "detail": [f"{m:+.1%}" for m in move[bad]],
+        "before_price": b["prev_close"].to_numpy(),
+        "reference_price": b["close"].to_numpy(),
+        "factor": (b["prev_close"] / b["close"]).to_numpy(),
+    })[cols]
+
+
 # -- build -----------------------------------------------------------------
 
 
@@ -271,6 +329,12 @@ def build(root: str | Path, since: str = "2010-01-01") -> dict[str, int]:
         raw.read(SPLIT),
         raw.read(PAR_VALUE),
     )
+
+    fixes = unexplained_moves(prices, actions, pd.DatetimeIndex(tdays["date"]))
+    if len(fixes):
+        log.info("neutralized %d unexplained moves beyond the price limit", len(fixes))
+        actions = (pd.concat([actions, fixes], ignore_index=True)
+                   .sort_values(["stock_id", "date"]).reset_index(drop=True))
 
     tables = {
         "universe": universe,
