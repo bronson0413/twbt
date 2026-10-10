@@ -66,3 +66,9 @@ def test_from_data_plumbing(server, tmp_path, fixed_now):
                      [pd.Timestamp("2024-04-10")], BacktestConfig(capital=100_000))
     # signal on 04-10, but 2330 has no quote on 04-11: nothing can fill
     assert r.trades.empty and r.equity.iloc[-1] == 100_000
+
+
+def test_equal_weight_skips_illiquid():
+    from twbt.strategies import equal_weight
+    w = equal_weight()(ctx_with([]))
+    assert w == pytest.approx({"A": 1 / 3, "B": 1 / 3, "C": 1 / 3})

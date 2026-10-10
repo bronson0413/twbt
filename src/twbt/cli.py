@@ -62,7 +62,8 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def _settings(args: argparse.Namespace) -> Settings:
-    s = Settings(capital=args.capital, top_n=args.top_n, months=args.months,
+    s = Settings(capital=args.capital, strategy_name=args.strategy, top_n=args.top_n,
+                 months=args.months,
                  min_avg_value=args.min_avg_value, rebalance_day=args.rebalance_day,
                  commission_discount=args.discount, min_commission=args.min_fee,
                  slippage=args.slippage, lot_size=args.lot,
@@ -77,6 +78,8 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     root = _data_dir(args.data_dir)
     strat, bench = run_bt(root, _settings(args))
     print(format_summary(strat, bench))
+    if args.no_save:
+        return 0
     out = root / "results"
     out.mkdir(parents=True, exist_ok=True)
     eq = strat.equity.to_frame("strategy").join(bench.equity.rename("benchmark"))
@@ -102,6 +105,8 @@ def cmd_signal(args: argparse.Namespace) -> int:
 def _strategy_args(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--end", help="default: today")
     sp.add_argument("--capital", type=float, default=250_000)
+    sp.add_argument("--strategy", choices=["revenue", "equal"], default="revenue",
+                    help="revenue = monthly revenue momentum; equal = all liquid stocks (baseline)")
     sp.add_argument("--top-n", type=int, default=8, help="number of stocks to hold")
     sp.add_argument("--months", type=int, default=3, help="months of YoY growth to average")
     sp.add_argument("--min-avg-value", type=float, default=10_000_000,
@@ -138,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--from", dest="bt_start", default="2012-01-01",
                    help="backtest start; revenue YoY needs ~15 months of history before it")
     b.add_argument("--delist-recovery", type=float, default=1.0)
+    b.add_argument("--no-save", action="store_true", help="don't write data/results/")
     b.set_defaults(func=cmd_backtest)
 
     g = sub.add_parser("signal", help="this month's target portfolio (for paper trading)")

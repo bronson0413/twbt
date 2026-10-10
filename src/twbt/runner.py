@@ -12,7 +12,7 @@ import pandas as pd
 from .data.query import Data
 from .engine import BacktestConfig, Context, CostModel, MarketData, Result, run_backtest
 from .engine.schedule import monthly_on_or_after
-from .strategies import buy_and_hold, revenue_momentum
+from .strategies import buy_and_hold, equal_weight, revenue_momentum
 
 BENCHMARK = "0050"
 
@@ -22,6 +22,7 @@ class Settings:
     start: str = "2013-01-01"
     end: str = date.today().isoformat()
     capital: float = 250_000
+    strategy_name: str = "revenue"
     top_n: int = 8
     months: int = 3
     min_avg_value: float = 10_000_000
@@ -39,6 +40,8 @@ class Settings:
                               delist_recovery=self.delist_recovery)
 
     def strategy(self):
+        if self.strategy_name == "equal":
+            return equal_weight(min_avg_value=self.min_avg_value)
         return revenue_momentum(top_n=self.top_n, months=self.months,
                                 min_avg_value=self.min_avg_value)
 
