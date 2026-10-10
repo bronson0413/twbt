@@ -78,13 +78,21 @@ def fig_equity(res: StudyResult, path: Path) -> None:
     fig = _fig(10, 4)
     ax = fig.subplots()
     series = [(res.selected, BLUE), ("EQUAL", ORANGE), (BENCHMARK, AQUA)]
+    ends = []
     for name, color in series:
         eq = res.portfolios[name].equity
         eq = eq / eq.iloc[0]
         ax.plot(eq.index, eq.values, color=color, linewidth=2, label=NAMES[name])
-        ax.annotate(f"{NAMES[name]}  {eq.iloc[-1]:.1f}x", (eq.index[-1], eq.iloc[-1]),
-                    xytext=(6, 0), textcoords="offset points", fontsize=8, color=INK_2,
-                    va="center")
+        ends.append((float(eq.iloc[-1]), name, eq.index[-1]))
+    # End labels just right of each line, nudged to stay ≥ 9% apart on the log scale.
+    ends.sort()
+    nudge = (ends[-1][2] - res.portfolios[res.selected].equity.index[0]) * 0.008
+    prev_y = None
+    for y, name, x in ends:
+        ly = y if prev_y is None else max(y, prev_y * 1.09)
+        prev_y = ly
+        ax.annotate(f"{NAMES[name]}  {y:.1f}x", xy=(x, y), xytext=(x + nudge, ly),
+                    fontsize=8, color=INK_2, va="center", annotation_clip=False)
     _log_axis(ax)
     _style(ax)
     split = pd.Timestamp(res.cfg.split)
