@@ -17,6 +17,8 @@ from .strategies import buy_and_hold, equal_weight, revenue_momentum
 from .strategies.revenue_momentum import DEFAULT_EXCLUDED_INDUSTRIES, eligible, revenue_scores
 
 BENCHMARK = "0050"
+# Strategies defined by the strategy search (twbt search); see research/search.py
+SEARCH_ONLY = ("VALUE", "QUALITY", "YIELD", "LOWVOL", "INST", "QV", "ALL")
 
 
 @dataclass
@@ -51,6 +53,12 @@ class Settings:
     def strategy(self):
         if self.strategy_name == "equal":
             return equal_weight(min_avg_value=self.min_avg_value)
+        if self.strategy_name.upper() in SEARCH_ONLY:
+            from .research.search import candidates
+            from .strategies import top_n
+            f = candidates()[self.strategy_name.upper()]
+            return top_n(f, self.top_n, self.min_avg_value, self.excluded,
+                         name=self.strategy_name)
         if self.strategy_name in ("combo", "momentum"):
             from .research.study import StudyConfig, signals
             from .strategies import top_n

@@ -13,6 +13,8 @@ import duckdb
 import pandas as pd
 
 TABLES = ("universe", "trading_days", "prices", "revenue", "corporate_actions")
+# Added later; a clean layer built before them simply has no such data.
+OPTIONAL_TABLES = ("valuation", "flows")
 
 
 class Data:
@@ -22,12 +24,19 @@ class Data:
         if missing:
             raise FileNotFoundError(f"clean layer missing {missing}; run `twbt build` first")
         self.con = duckdb.connect()
-        for t in TABLES:
+        self.tables = set()
+        for t in TABLES + OPTIONAL_TABLES:
+            if not (clean / f"{t}.parquet").exists():
+                continue
             path = (clean / f"{t}.parquet").as_posix().replace("'", "''")
             self.con.execute(f"CREATE VIEW {t} AS SELECT * FROM read_parquet('{path}')")
+            self.tables.add(t)
 
     def sql(self, query: str, params: list | None = None) -> pd.DataFrame:
         return self.con.execute(query, params or []).df()
+
+    def has(self, table: str) -> bool:
+        return table in self.tables
 
     # -- point-in-time accessors ----------------------------------------------
 

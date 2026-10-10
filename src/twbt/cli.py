@@ -120,6 +120,18 @@ def cmd_research(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_search(args: argparse.Namespace) -> int:
+    from .research.search import SearchConfig, run_search, save
+
+    cfg = SearchConfig(split=args.split, end=args.end, n=args.n)
+    only = args.only.upper().split(",") if args.only else None
+    res = run_search(Data(_data_dir(args.data_dir)), cfg, log=lambda m: print(m, flush=True),
+                     only=only)
+    numbers = save(res, args.out)
+    print(f"selected {numbers['selected']}; report written to {args.out}/REPORT.md")
+    return 0
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     from .engine import MarketData
     from .research.audit import impossible_moves, stock_summary
@@ -161,10 +173,13 @@ def cmd_signal(args: argparse.Namespace) -> int:
 def _strategy_args(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--end", help="default: today")
     sp.add_argument("--capital", type=float, default=250_000)
-    sp.add_argument("--strategy", choices=["revenue", "combo", "momentum", "equal"],
+    sp.add_argument("--strategy",
+                    choices=["revenue", "combo", "momentum", "equal", "value", "quality",
+                             "yield", "lowvol", "inst", "qv", "all"],
                     default="revenue",
                     help="revenue = monthly revenue growth; combo = revenue + price momentum; "
-                         "momentum = 12-1 price momentum; equal = all liquid stocks (baseline)")
+                         "momentum = 12-1 price momentum; equal = all liquid stocks (baseline); "
+                         "value/quality/yield/lowvol/inst/qv/all: see `twbt search`")
     sp.add_argument("--top-n", type=int, default=8, help="number of stocks to hold")
     sp.add_argument("--method", choices=["sum", "mean"], default="sum",
                     help="sum = N-month total vs last year; mean = average of monthly YoY")
@@ -223,6 +238,14 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--end", help="default: last price date")
     r.add_argument("--out", default="docs/research")
     r.set_defaults(func=cmd_research)
+
+    s = sub.add_parser("search", help="compare ten candidate signals, pick one to trade")
+    s.add_argument("--split", default="2023-01-01", help="out-of-sample start")
+    s.add_argument("--end", help="default: last price date")
+    s.add_argument("--n", type=int, default=30, help="stocks held")
+    s.add_argument("--only", help="comma-separated candidates, e.g. value,inst (quick check)")
+    s.add_argument("--out", default="docs/strategy")
+    s.set_defaults(func=cmd_search)
 
     a = sub.add_parser("audit", help="find impossible price moves; spot-check stocks")
     a.add_argument("--end")

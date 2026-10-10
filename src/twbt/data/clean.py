@@ -7,6 +7,8 @@ Outputs under ``<root>/clean``:
     prices.parquet            raw (unadjusted) daily OHLCV
     revenue.parquet           monthly revenue with ``available_date``
     corporate_actions.parquet ex-dividend / capital reduction / split / par-value events
+    valuation.parquet         daily P/E, P/B, dividend yield
+    flows.parquet             daily net buy (shares) by foreign investors and trusts
 
 The clean layer can always be rebuilt from raw; it is never edited by hand.
 """
@@ -23,12 +25,14 @@ from .datasets import (
     CAPITAL_REDUCTION,
     DELISTING,
     DIVIDEND_RESULT,
+    INSTITUTIONAL,
     MONTH_REVENUE,
     PAR_VALUE,
     PRICE,
     SPLIT,
     STOCK_INFO,
     TRADING_DATE,
+    VALUATION,
 )
 from .store import RawStore
 from .universe import build_universe
@@ -161,6 +165,69 @@ def clean_revenue(raw: pd.DataFrame, trading_days: pd.DatetimeIndex | None = Non
     df["available_date"] = available
     df = df.drop_duplicates(["stock_id", "period"], keep="last")
     return df.sort_values(["stock_id", "period"]).reset_index(drop=True)[cols]
+
+
+# -- valuation and institutional flows ----------------------------------------
+
+
+def clean_valuation(raw: pd.DataFrame) -> pd.DataFrame:
+    """Daily P/E, P/B and cash dividend yield (%), one row per stock-day.
+
+    The exchange leaves P/E empty for loss-making companies; FinMind writes 0.
+    Zero or negative ratios become NaN so they are never read as "very cheap".
+    """
+    cols = ["date", "stock_id", "pe", "pb", "dividend_yield"]
+    if raw.empty:
+        return pd.DataFrame(columns=cols)
+
+    def num(col: str) -> pd.Series:
+        if col not in raw.columns:
+            return pd.Series(np.nan, index=raw.index)
+        return pd.to_numeric(raw[col], errors="coerce")
+
+    df = pd.DataFrame({
+        "date": pd.to_datetime(raw["date"]),
+        "stock_id": raw["stock_id"].astype(str),
+        "pe": num("PER"),
+        "pb": num("PBR"),
+        "dividend_yield": num("dividend_yield"),
+    })
+    for c in ("pe", "pb"):
+        df.loc[df[c] <= 0, c] = np.nan
+    df.loc[df["dividend_yield"] < 0, "dividend_yield"] = np.nan
+    df = df.drop_duplicates(["stock_id", "date"], keep="last")
+    return df.sort_values(["stock_id", "date"]).reset_index(drop=True)[cols]
+
+
+def clean_institutional(raw: pd.DataFrame) -> pd.DataFrame:
+    """Daily net buy in shares by foreign investors and investment trusts.
+
+    FinMind reports one row per investor type. Foreign investors appear as
+    ``Foreign_Investor`` and (from 2017) ``Foreign_Dealer_Self``; both are
+    summed. Dealers are left out: much of their trading hedges warrants.
+    """
+    cols = ["date", "stock_id", "foreign_net", "trust_net"]
+    if raw.empty:
+        return pd.DataFrame(columns=cols)
+    name = raw["name"].astype(str)
+    net = (pd.to_numeric(raw["buy"], errors="coerce").fillna(0)
+           - pd.to_numeric(raw["sell"], errors="coerce").fillna(0))
+    kind = np.where(name.str.startswith("Foreign"), "foreign_net",
+                    np.where(name == "Investment_Trust", "trust_net", ""))
+    df = pd.DataFrame({"date": pd.to_datetime(raw["date"]),
+                       "stock_id": raw["stock_id"].astype(str), "kind": kind,
+                       "net": net.astype(float)})
+    df = df[df["kind"] != ""]
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+    wide = (df.groupby(["date", "stock_id", "kind"])["net"].sum()
+            .unstack("kind", fill_value=0.0).reset_index())
+    for c in ("foreign_net", "trust_net"):
+        if c not in wide:
+            wide[c] = 0.0
+        wide[c] = wide[c].astype(float)
+    wide.columns.name = None
+    return wide.sort_values(["stock_id", "date"]).reset_index(drop=True)[cols]
 
 
 # -- corporate actions --------------------------------------------------------
@@ -332,6 +399,24 @@ def unexplained_moves(
 # -- build -----------------------------------------------------------------
 
 
+def _clean_each(raw: RawStore, spec, fn) -> pd.DataFrame:
+    """Clean a per-stock dataset one file at a time.
+
+    Daily institutional data is ~20k raw rows per stock; reading every file
+    first would need several GB before cleaning shrinks it.
+    """
+    d = raw.root / spec.name
+    parts = []
+    for p in sorted(d.glob("*.parquet")) if d.exists() else []:
+        df = pd.read_parquet(p)
+        if not df.empty:
+            parts.append(fn(df))
+    parts = [p for p in parts if not p.empty]
+    if not parts:
+        return fn(pd.DataFrame())
+    return pd.concat(parts, ignore_index=True)
+
+
 def build(root: str | Path, since: str = "2010-01-01") -> dict[str, int]:
     root = Path(root)
     raw = RawStore(root)
@@ -366,6 +451,8 @@ def build(root: str | Path, since: str = "2010-01-01") -> dict[str, int]:
         "prices": prices,
         "revenue": revenue,
         "corporate_actions": actions,
+        "valuation": _clean_each(raw, VALUATION, clean_valuation),
+        "flows": _clean_each(raw, INSTITUTIONAL, clean_institutional),
     }
     for name, df in tables.items():
         df.to_parquet(out / f"{name}.parquet", index=False)

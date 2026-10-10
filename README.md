@@ -60,7 +60,7 @@ twbt build                  # 整理成 clean 層
 twbt research               # 產生 docs/research/
 ```
 
-其他指令：`twbt backtest`（單一策略對 0050）、`twbt factor`（訊號版本比較）、`twbt audit`（資料稽核）、`twbt signal`（當月目標持股）、`twbt status`。
+其他指令：`twbt search`（比較十個候選訊號、選出要實際交易的策略，產生 docs/strategy/）、`twbt backtest`（單一策略對 0050）、`twbt factor`（訊號版本比較）、`twbt audit`（資料稽核）、`twbt signal`（當月目標持股）、`twbt status`。
 
 也可以不用自己的電腦：`.github/workflows/data.yml` 會在 GitHub Actions 上每天更新資料，並依需要執行研究流程。
 

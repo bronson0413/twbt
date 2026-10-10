@@ -20,6 +20,8 @@ class MarketData:
         revenue: pd.DataFrame | None = None,
         actions: pd.DataFrame | None = None,
         trading_days: Iterable | None = None,
+        valuation: pd.DataFrame | None = None,
+        flows: pd.DataFrame | None = None,
     ) -> None:
         prices = prices.copy()
         prices["date"] = pd.to_datetime(prices["date"])
@@ -43,6 +45,34 @@ class MarketData:
         self.low = wide("low")
         self.close = wide("close")
         self.value = wide("value") if "value" in prices else np.full_like(self.close, np.nan)
+        self.volume = wide("volume") if "volume" in prices else np.full_like(self.close, np.nan)
+
+        def wide_other(df: pd.DataFrame | None, fields: tuple[str, ...]) -> dict[str, np.ndarray]:
+            if df is None or df.empty:
+                return {f: np.full_like(self.close, np.nan) for f in fields}
+            # Direct numpy assignment: a pivot of ~10M daily rows needs several GB.
+            dates = pd.to_datetime(df["date"]).to_numpy()
+            r = days.searchsorted(dates)
+            sid = df["stock_id"].astype(str).map(self.col)
+            ok = sid.notna().to_numpy() & (r < len(days))
+            ok[ok] &= days.to_numpy()[r[ok]] == dates[ok]
+            r, c = r[ok], sid.to_numpy()[ok].astype(int)
+            out = {}
+            for f in fields:
+                arr = np.full_like(self.close, np.nan)
+                arr[r, c] = pd.to_numeric(df[f], errors="coerce").to_numpy(dtype=float)[ok]
+                out[f] = arr
+            return out
+
+        # Daily exchange valuation ratios (NaN where not published, e.g. P/E of a loss maker)
+        v = wide_other(valuation, ("pe", "pb", "dividend_yield"))
+        self.pe, self.pb, self.dividend_yield = v["pe"], v["pb"], v["dividend_yield"]
+        # Daily net buy in shares; NaN = no row that day (treated as 0 by accessors)
+        f = wide_other(flows, ("foreign_net", "trust_net"))
+        self.foreign_net, self.trust_net = f["foreign_net"], f["trust_net"]
+        self.inst_net = np.nan_to_num(self.foreign_net) + np.nan_to_num(self.trust_net)
+        self.has_flows = flows is not None and not flows.empty
+        self.has_valuation = valuation is not None and not valuation.empty
 
         # first day each stock had a real quote; len(days) if never
         has = ~np.isnan(self.close)
@@ -112,6 +142,8 @@ class MarketData:
                              [pd.Timestamp(end)]),
             actions=data.corporate_actions(load_from, end),
             trading_days=data.trading_days(load_from, end),
+            valuation=_between(data, "valuation", load_from, end, ids),
+            flows=_between(data, "flows", load_from, end, ids),
         )
 
     @property
@@ -139,3 +171,14 @@ class MarketData:
     def index_of(self, date) -> int:
         """Index of the first trading day on or after ``date``."""
         return int(self.dates.searchsorted(pd.Timestamp(date)))
+
+
+def _between(data: Data, table: str, start, end, ids: list[str]) -> pd.DataFrame | None:
+    """Rows of an optional daily table in [start, end] for ``ids``; None if absent."""
+    if not data.has(table):
+        return None
+    cols = ("date, stock_id, pe, pb, dividend_yield" if table == "valuation"
+            else "date, stock_id, foreign_net, trust_net")
+    return data.sql(f"SELECT {cols} FROM {table} WHERE date BETWEEN ? AND ? "
+                    "AND stock_id IN (SELECT UNNEST(?))",
+                    [pd.Timestamp(start), pd.Timestamp(end), list(ids)])

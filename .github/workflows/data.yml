@@ -27,6 +27,10 @@ on:
         description: "Run the full research study (≈15 min) and publish it on `reports`"
         type: boolean
         default: false
+      search:
+        description: "Run the strategy search (ten candidate signals) and publish it on `reports`"
+        type: boolean
+        default: false
       experiments:
         description: "Extra twbt runs for the report, separated by ';' (e.g. backtest --top-n 30)"
         type: string
@@ -79,6 +83,10 @@ jobs:
         if: inputs.research
         run: twbt research --out data/research
 
+      - name: Strategy search
+        if: inputs.search
+        run: twbt search --out data/strategy
+
       - name: Report (run summary page + `reports` branch)
         if: always()
         env:
@@ -111,10 +119,12 @@ jobs:
           cat report.md >> "$GITHUB_STEP_SUMMARY"
           dir=$(mktemp -d); cp report.md "$dir/"
           # keep the last published study unless this run produced a new one
-          if [ -d data/research ]; then cp -r data/research "$dir/research"; else
-            git fetch -q --depth 1 origin reports 2>/dev/null \
-              && git archive FETCH_HEAD research 2>/dev/null | tar -x -C "$dir" || true
-          fi
+          git fetch -q --depth 1 origin reports 2>/dev/null || true
+          for d in research strategy; do
+            if [ -d "data/$d" ]; then cp -r "data/$d" "$dir/$d"; else
+              git archive FETCH_HEAD "$d" 2>/dev/null | tar -x -C "$dir" || true
+            fi
+          done
           cd "$dir"
           git init -q -b reports && git add -A
           git -c user.name=github-actions -c user.email=actions@github.com \
