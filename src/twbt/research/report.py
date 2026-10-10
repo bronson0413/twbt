@@ -247,10 +247,21 @@ def _sanity(n: dict) -> str:
     return "\n".join(lines)
 
 
+T_5PCT = 1.96   # two-sided 5%
+T_STRONG = 2.5
+
+
+def _level(t: float) -> int:
+    """0 = not significant, 1 = marginal (5% but < 2.5), 2 = significant."""
+    if t is None or (isinstance(t, float) and np.isnan(t)):
+        return 0
+    return 2 if abs(t) >= T_STRONG else 1 if abs(t) >= T_5PCT else 0
+
+
 def _sig(t: float) -> str:
     if t is None or (isinstance(t, float) and np.isnan(t)):
         return "無法判斷"
-    return "顯著" if abs(t) >= 2 else "不顯著"
+    return ("不顯著", "邊際顯著", "顯著")[_level(t)]
 
 
 def _conclusion(n: dict, res: StudyResult) -> str:
@@ -263,22 +274,22 @@ def _conclusion(n: dict, res: StudyResult) -> str:
     ys = n["yearly_spread"]
     pos = sum(v > 0.0005 for v in ys.values())
 
-    if t_is >= 2 and t_oos >= 2 and liq_t >= 2:
+    if t_is >= T_5PCT and t_oos >= T_5PCT and liq_t >= T_5PCT:
         signal_head = "有效，而且在樣本外與各流動性層都成立"
-    elif t_is >= 2 and t_oos >= 2:
+    elif t_is >= T_5PCT and t_oos >= T_5PCT:
         signal_head = "樣本內外都有效，但不是每個流動性層都成立"
-    elif t_is >= 2:
+    elif t_is >= T_5PCT:
         signal_head = "樣本內有效，樣本外沒有得到確認"
     else:
         signal_head = "證據不足"
 
     a_is, a_oos = p["vs_equal_is"], p["vs_equal_oos"]
-    sig_is, sig_oos = a_is["t"] >= 2, a_oos["t"] >= 2
-    if sig_is and sig_oos:
-        port_head = "樣本內外都有顯著的超額報酬"
-    elif sig_oos:
-        port_head = "超額報酬只在樣本外顯著"
-    elif sig_is:
+    lv_is, lv_oos = _level(a_is["t"]), _level(a_oos["t"])
+    if lv_is and lv_oos:
+        port_head = "樣本內外都有統計上可辨識的超額報酬"
+    elif lv_oos:
+        port_head = f"超額報酬在樣本內不顯著，只在樣本外{_sig(a_oos['t'])}"
+    elif lv_is:
         port_head = "超額報酬只在樣本內顯著，樣本外沒有延續"
     else:
         port_head = "超額報酬在樣本內外都不顯著"
@@ -292,13 +303,13 @@ def _conclusion(n: dict, res: StudyResult) -> str:
         f"（t={num(t_is)}，{_sig(t_is)}），樣本外每月 {pct(f['oos']['top_minus_bottom_monthly'], True, 2)}"
         f"（t={num(t_oos)}，{_sig(t_oos)}）。",
         f"- 依流動性分三層、在每層內部重新分組，最小的 t 值為 {num(liq_t)}"
-        + ("，訊號不只是小型股效應。" if liq_t >= 2 else "，部分流動性層不顯著。"),
+        + ("，訊號不只是小型股效應。" if liq_t >= T_5PCT else "，部分流動性層不顯著。"),
         f"- 全期 {len(ys)} 年中有 {pos} 年 Q{g} 勝過 Q1。",
     ]
     if "neutral" in n:
         nt = n["neutral"]["full"]["top_minus_bottom_tstat"]
         lines.append(f"- 在每個產業內部重新排名後，全期 t={num(nt)}，"
-                     + ("訊號不是單純押對產業。" if nt >= 2 else "大部分效果可能來自產業選擇。"))
+                     + ("訊號不是單純押對產業。" if nt >= T_5PCT else "大部分效果可能來自產業選擇。"))
     rd = n["regime"]
     lines.append(f"- 下跌月（{rd['down']['months']} 個月）的價差每月 {pct(rd['down']['spread'], True, 2)}"
                  f"（t={num(rd['down']['t'])}），上漲月 {pct(rd['up']['spread'], True, 2)}"
@@ -307,7 +318,9 @@ def _conclusion(n: dict, res: StudyResult) -> str:
         "",
         f"**可實際交易的 top-{n['main_n']} 組合（含成本）：{port_head}。**",
         f"- 相對全體等權重指數（不計成本）的年化超額報酬：樣本內 {pct(a_is['active_return'], True)}"
-        f"（t={num(a_is['t'])}），樣本外 {pct(a_oos['active_return'], True)}（t={num(a_oos['t'])}）。",
+        f"（t={num(a_is['t'])}，{_sig(a_is['t'])}），樣本外 {pct(a_oos['active_return'], True)}"
+        f"（t={num(a_oos['t'])}，{_sig(a_oos['t'])}）。顯著性以雙尾 5%（|t| ≥ 1.96）為門檻，"
+        "1.96–2.5 之間標為邊際顯著。",
     ]
     if eq["oos"]["cagr"] - eq["is"]["cagr"] > 0.05:
         lines.append(
