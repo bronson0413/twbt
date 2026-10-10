@@ -90,3 +90,43 @@ def test_search_needs_new_tables(tmp_path, search_dir):
     (tmp_path / "clean" / "flows.parquet").unlink()
     with pytest.raises(RuntimeError):
         run_search(Data(tmp_path), SearchConfig(), log=lambda m: None)
+
+
+def test_live_orders_and_monthly_diff(search, search_dir, tmp_path):
+    from twbt.live import diff, run
+
+    _, n, out = search
+    first = run(search_dir, out / "results.json", tmp_path / "live")
+    t = first["target"]
+    assert t["strategy"] == n["selected"] and len(t["holdings"]) == n["n"]
+    assert all(h["shares"] > 0 for h in t["holdings"])
+    assert "第一次建立部位" in first["markdown"]
+    # pretend last month held something else: one stock sold, all of this month's bought
+    prev = dict(t, date="2023-11-13", holdings=[dict(t["holdings"][0]),
+                                                 dict(t["holdings"][0], stock_id="9999")])
+    p = tmp_path / "prev.json"
+    p.write_text(__import__("json").dumps(prev), encoding="utf-8")
+    second = run(search_dir, out / "results.json", tmp_path / "live2", previous=p)
+    d = diff(second["target"], prev)
+    assert [h["stock_id"] for h in d["sell"]] == ["9999"]
+    assert len(d["keep"]) == 1 and len(d["buy"]) == n["n"] - 1
+    assert "賣出" in second["markdown"] and "續抱" in second["markdown"]
+    # rerun in the same month still diffs against last month, not against itself
+    third = run(search_dir, out / "results.json", tmp_path / "live2",
+                previous=tmp_path / "live2" / "latest.json")
+    assert "9999" in third["markdown"]
+
+
+def test_track_reports_holdings_since_signal(search, search_dir, tmp_path):
+    import json as _json
+
+    from twbt.live import run, track
+
+    _, n, out = search
+    run(search_dir, out / "results.json", tmp_path / "live")
+    latest = _json.loads((tmp_path / "live" / "latest.json").read_text(encoding="utf-8"))
+    latest["date"] = "2023-10-02"  # pretend the list was made two months before the data end
+    (tmp_path / "old.json").write_text(_json.dumps(latest), encoding="utf-8")
+    text = track(search_dir, tmp_path / "old.json", tmp_path / "live")
+    assert "持股等權重報酬" in text and "nan" not in text.lower()
+    assert all(h["stock_id"] in text for h in latest["holdings"])

@@ -96,8 +96,11 @@ class SearchConfig:
     start: str = "2012-01-01"
     end: str | None = None
     split: str = "2023-01-01"
-    capital: float = 250_000
-    n: int = 30
+    # Fixed on 2026-10-10 for the owner's account (~NT$300k, few holdings),
+    # before any of the new signals had been backtested.
+    capital: float = 300_000
+    n: int = 10
+    grid_n: tuple[int, ...] = (10, 20, 30)
     min_avg_value: float = 10_000_000
     rebalance_day: int = 11
     groups: int = 5
@@ -114,6 +117,7 @@ class SearchResult:
     selected: str
     last_date: pd.Timestamp
     coverage: dict[str, float]
+    grid: dict[int, Result] = field(default_factory=dict)
 
 
 def run_search(data: Data, cfg: SearchConfig, log: Callable[[str], None] = print,
@@ -156,7 +160,12 @@ def run_search(data: Data, cfg: SearchConfig, log: Callable[[str], None] = print
                   for n in sigs}
     selected = max(ins_sharpe, key=lambda n: ins_sharpe[n])
     log(f"selected by in-sample Sharpe: {selected} {ins_sharpe}")
-    return SearchResult(cfg, factor, portfolios, selected, market.dates[-1], coverage)
+    grid = {cfg.n: portfolios[selected]}
+    for k in cfg.grid_n:
+        if k not in grid:
+            log(f"robustness {selected} top{k}")
+            grid[k] = bt(top_n(sigs[selected], k, cfg.min_avg_value, name=selected), cfg.costs)
+    return SearchResult(cfg, factor, portfolios, selected, market.dates[-1], coverage, grid)
 
 
 def _coverage(market: MarketData, schedule, universe) -> dict[str, float]:
@@ -209,6 +218,13 @@ def collect(res: SearchResult) -> dict:
                          / eq.groupby(eq.index.year).last().shift(1).fillna(eq.iloc[0])
                          - 1).items()}
     out["yearly"] = yearly
+    out["grid"] = {}
+    for k, r in sorted(res.grid.items()):
+        ins, oos = split_curve(r.equity, split)
+        out["grid"][str(k)] = {"is": curve_stats(ins), "oos": curve_stats(oos),
+                               "vs_equal_oos": active_stats(oos, e_oos),
+                               "turnover": r.summary()["turnover_per_year"],
+                               "costs_total": r.summary()["total_costs"]}
     out["selected_impossible_days"] = int((sel.pct_change().abs() > 0.11).sum())
     return out
 
@@ -301,7 +317,17 @@ def render(numbers: dict) -> str:
             f"{p['turnover']:.1f}x |")
     lines += ["", "全體等權重不計成本（約 800 檔，實際無法以 25 萬元複製），所以是偏高的基準。"
               "0050 只列出參考，不參與任何判斷。", ""]
-    lines += [f"## 3. {sel} 逐年報酬", "", f"| 年度 | {sel} | 全體等權重 | 0050 |",
+    lines += [f"## 3. {sel} 持股檔數敏感度", "",
+              f"主要結果用 {n['n']} 檔（事先依資金決定）；其他檔數只供參考，不參與選擇。", "",
+              "| 檔數 | 樣本內年化 | Sharpe | 樣本外年化 | Sharpe | 樣本外最大回撤 | 樣本外超額 vs 等權重 | 年換手 |",
+              "|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    for k, g in n["grid"].items():
+        lines.append(f"| {k} | {_pct(g['is']['cagr'])} | {_t(g['is']['sharpe'])} | "
+                     f"{_pct(g['oos']['cagr'])} | {_t(g['oos']['sharpe'])} | "
+                     f"{_pct(g['oos']['max_dd'])} | {_pct(g['vs_equal_oos']['active_return'], True)} | "
+                     f"{g['turnover']:.1f}x |")
+    lines += [""]
+    lines += [f"## 4. {sel} 逐年報酬", "", f"| 年度 | {sel} | 全體等權重 | 0050 |",
               "|---|---:|---:|---:|"]
     y = n["yearly"]
     for year in sorted(y[sel]):
@@ -310,8 +336,9 @@ def render(numbers: dict) -> str:
     cov = n["coverage"]
     lines += [
         "",
-        "## 4. 方法與限制",
+        "## 5. 方法與限制",
         "",
+        f"- 持股檔數（{n['n']} 檔）與資金（{n['capital']:,.0f} 元）在任何新訊號回測之前，依帳戶規模決定。",
         "- 股票池、調倉日、成本與第一份研究相同：20 日均成交值 ≥ 1,000 萬、排除建材營造；"
         "每月 11 日後第一個交易日收盤產生訊號，隔天開盤成交；手續費 2.8 折、最低 20 元、"
         "證交稅 0.3%、每邊滑價 0.1%。",

@@ -1,13 +1,20 @@
 # Downloads FinMind data on GitHub's machines, so no local computer is needed.
 #
-# * Runs daily. Each run downloads for up to ~5.3 hours, then stops cleanly;
-#   progress is kept in the Actions cache and the next run resumes.
-# * After that, --min-age-hours 600 makes runs no-ops until data is ~25 days
-#   old, i.e. one refresh a month (enough for monthly rebalancing).
-# * The clean layer is uploaded as the `clean-data` artifact after every run.
-# * Status, the tail of the download log, the backtest summary and this month's
-#   target portfolio go to the run's summary page and to report.md on the
-#   `reports` branch (overwritten each run).
+# Monthly calendar (Taipei time). The free tier allows ~550 calls an hour and
+# needs one call per stock and dataset, so a full refresh takes about a day.
+#
+# * Days 7–10, four times a day: refresh prices, valuation, institutional
+#   flows and corporate actions (each run downloads ≤5.3 h, then resumes in
+#   the next run; once everything is fresh the runs do nothing).
+# * Days 11–13: refresh monthly revenue (published by the 10th), then write
+#   this month's orders for the strategy chosen by `twbt search` to
+#   `live/latest.md` on the `reports` branch.
+# * Day 25: refresh prices of the current holdings and write
+#   `live/status.md` (how the holdings have done since the orders).
+# * Manual runs: download everything older than ~25 days, optionally run the
+#   research study / strategy search, and write a full diagnostic report.
+#
+# Results go to the run's summary page and to the `reports` branch.
 #
 # Setup: Settings → Secrets and variables → Actions → New secret FINMIND_TOKEN.
 # Keep this repo private: FinMind's licence does not allow redistributing data.
@@ -16,7 +23,9 @@ name: data
 
 on:
   schedule:
-    - cron: "17 1 * * *"  # daily 09:17 Taipei; data refreshes ~monthly
+    - cron: "17 1,7,13,19 7-10 * *"  # bulk refresh
+    - cron: "47 2 11-13 * *"         # revenue + monthly orders
+    - cron: "47 2 25 * *"            # holdings status
   workflow_dispatch:
     inputs:
       download:
@@ -29,6 +38,10 @@ on:
         default: false
       search:
         description: "Run the strategy search (ten candidate signals) and publish it on `reports`"
+        type: boolean
+        default: false
+      live:
+        description: "Also write this month's orders and the holdings status"
         type: boolean
         default: false
       experiments:
@@ -55,6 +68,16 @@ jobs:
           cache: pip
       - run: pip install -e ".[research]"
 
+      - name: Decide what this run does
+        id: mode
+        run: |
+          case "${{ github.event.schedule }}" in
+            "17 1,7,13,19 7-10 * *") echo "mode=bulk" >> "$GITHUB_OUTPUT" ;;
+            "47 2 11-13 * *")        echo "mode=orders" >> "$GITHUB_OUTPUT" ;;
+            "47 2 25 * *")           echo "mode=status" >> "$GITHUB_OUTPUT" ;;
+            *)                       echo "mode=manual" >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - name: Restore raw data
         uses: actions/cache/restore@v4
         with:
@@ -62,12 +85,36 @@ jobs:
           key: raw-${{ github.run_id }}
           restore-keys: raw-
 
+      - name: Last published results (strategy, orders)
+        run: |
+          mkdir -p prev
+          if git fetch -q --depth 1 origin reports 2>/dev/null; then
+            git show FETCH_HEAD:strategy/results.json > prev/results.json 2>/dev/null || rm -f prev/results.json
+            git show FETCH_HEAD:live/latest.json > prev/latest.json 2>/dev/null || rm -f prev/latest.json
+          fi
+          ls -la prev
+
       - name: Download (stops itself before the job time limit)
-        if: github.event_name == 'schedule' || inputs.download
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          MODE: ${{ steps.mode.outputs.mode }}
         run: |
-          timeout --signal=INT 320m twbt update --min-age-hours 600 2>&1 | tee update.log \
+          case "$MODE" in
+            bulk)
+              args="--min-age-hours 480 --datasets TaiwanStockPrice TaiwanStockPER
+                    TaiwanStockInstitutionalInvestorsBuySell TaiwanStockDividendResult
+                    TaiwanStockCapitalReductionReferencePrice" ;;
+            orders)
+              args="--min-age-hours 120 --datasets TaiwanStockMonthRevenue" ;;
+            status)
+              ids=$(python -c "import json;print(','.join(h['stock_id'] for h in json.load(open('prev/latest.json'))['holdings']))" 2>/dev/null || true)
+              if [ -z "$ids" ]; then echo "no holdings yet"; exit 0; fi
+              args="--min-age-hours 12 --datasets TaiwanStockPrice TaiwanStockPER --stocks $ids" ;;
+            manual)
+              if [ "${{ inputs.download }}" != "true" ]; then exit 0; fi
+              args="--min-age-hours 600" ;;
+          esac
+          timeout --signal=INT 320m twbt update $args 2>&1 | tee update.log \
             || echo "stopped, will resume"
 
       - name: Save raw data
@@ -87,48 +134,65 @@ jobs:
         if: inputs.search
         run: twbt search --out data/strategy
 
+      - name: Monthly orders
+        if: steps.mode.outputs.mode == 'orders' || inputs.live
+        run: |
+          results=prev/results.json
+          [ -f data/strategy/results.json ] && results=data/strategy/results.json
+          if [ ! -f "$results" ]; then echo "no strategy chosen yet (run the search)"; exit 0; fi
+          prevarg=""; [ -f prev/latest.json ] && prevarg="--previous prev/latest.json"
+          twbt live --results "$results" $prevarg --out data/live
+
+      - name: Holdings status
+        if: steps.mode.outputs.mode == 'status' || inputs.live
+        run: |
+          latest=prev/latest.json
+          [ -f data/live/latest.json ] && latest=data/live/latest.json
+          if [ ! -f "$latest" ]; then echo "no holdings yet"; exit 0; fi
+          twbt track --latest "$latest" --out data/live
+
       - name: Report (run summary page + `reports` branch)
         if: always()
         env:
           EXPERIMENTS: ${{ inputs.experiments }}
+          MODE: ${{ steps.mode.outputs.mode }}
         run: |
           {
-            echo "# twbt report — run ${{ github.run_id }}, $(date -u +%Y-%m-%dT%H:%MZ)"
+            echo "# twbt report — run ${{ github.run_id }} ($MODE), $(date -u +%Y-%m-%dT%H:%MZ)"
             echo; echo '## status'; echo '```'; twbt status 2>&1 || echo "(exit $?)"; echo '```'
             echo; echo '## download log (last 40 lines)'; echo '```'
             tail -n 40 update.log 2>/dev/null || echo "(no download this run)"; echo '```'
-            echo; echo '## factor analysis (signal variants, no costs)'; echo '```'
-            twbt factor 2>&1 || echo "(exit $?)"; echo '```'
-            echo; echo '## backtest: current strategy (sum, no construction, 3 months up)'; echo '```'
-            twbt backtest 2>&1 || echo "(exit $?)"; echo '```'
-            echo; echo '## backtest: original version, for comparison'; echo '```'
-            twbt backtest --no-save --method mean --min-consecutive 0 --keep-construction 2>&1 \
-              || echo "(exit $?)"; echo '```'
-            echo; echo '## baseline: all liquid stocks, equal weight, no commission or slippage'; echo '```'
-            twbt backtest --no-save --strategy equal --discount 0 --min-fee 0 --slippage 0 2>&1 \
-              || echo "(exit $?)"; echo '```'
-            IFS=';' read -ra runs <<< "$EXPERIMENTS"
-            for cmd in "${runs[@]}"; do
-              read -ra argv <<< "$cmd"
-              [ ${#argv[@]} -eq 0 ] && continue
-              echo; echo "## experiment: twbt ${argv[*]}"; echo '```'
-              twbt "${argv[@]}" 2>&1 || echo "(exit $?)"; echo '```'
+            for f in data/live/latest.md data/live/status.md; do
+              [ -f "$f" ] && { echo; cat "$f"; }
             done
-            echo; echo '## signal'; echo '```'; twbt signal 2>&1 || echo "(exit $?)"; echo '```'
+            if [ "$MODE" = manual ]; then
+              echo; echo '## backtest: revenue strategy vs 0050'; echo '```'
+              twbt backtest --no-save 2>&1 || echo "(exit $?)"; echo '```'
+              IFS=';' read -ra runs <<< "$EXPERIMENTS"
+              for cmd in "${runs[@]}"; do
+                read -ra argv <<< "$cmd"
+                [ ${#argv[@]} -eq 0 ] && continue
+                echo; echo "## experiment: twbt ${argv[*]}"; echo '```'
+                twbt "${argv[@]}" 2>&1 || echo "(exit $?)"; echo '```'
+              done
+            fi
           } > report.md
           cat report.md >> "$GITHUB_STEP_SUMMARY"
           dir=$(mktemp -d); cp report.md "$dir/"
-          # keep the last published study unless this run produced a new one
+          # Keep what earlier runs published; replace a directory only when this
+          # run produced it. live/ is merged so the monthly history accumulates.
           git fetch -q --depth 1 origin reports 2>/dev/null || true
-          for d in research strategy; do
-            if [ -d "data/$d" ]; then cp -r "data/$d" "$dir/$d"; else
-              git archive FETCH_HEAD "$d" 2>/dev/null | tar -x -C "$dir" || true
+          for d in research strategy live; do
+            git archive FETCH_HEAD "$d" 2>/dev/null | tar -x -C "$dir" || true
+            if [ -d "data/$d" ]; then
+              [ "$d" != live ] && rm -rf "$dir/$d"
+              mkdir -p "$dir/$d" && cp -r "data/$d/." "$dir/$d/"
             fi
           done
           cd "$dir"
           git init -q -b reports && git add -A
           git -c user.name=github-actions -c user.email=actions@github.com \
-            commit -q -m "report ${{ github.run_id }}"
+            commit -q -m "report ${{ github.run_id }} ($MODE)"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" reports
 
       - uses: actions/upload-artifact@v4

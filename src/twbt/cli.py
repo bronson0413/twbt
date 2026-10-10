@@ -132,6 +132,22 @@ def cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_live(args: argparse.Namespace) -> int:
+    from .live import run
+
+    out = run(_data_dir(args.data_dir), args.results, args.out, previous=args.previous,
+              capital=args.capital)
+    print(out["markdown"])
+    return 0
+
+
+def cmd_track(args: argparse.Namespace) -> int:
+    from .live import track
+
+    print(track(_data_dir(args.data_dir), args.latest, args.out))
+    return 0
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     from .engine import MarketData
     from .research.audit import impossible_moves, stock_summary
@@ -246,6 +262,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--only", help="comma-separated candidates, e.g. value,inst (quick check)")
     s.add_argument("--out", default="docs/strategy")
     s.set_defaults(func=cmd_search)
+
+    lv = sub.add_parser("live", help="this month's orders for the strategy chosen by search")
+    lv.add_argument("--results", default="docs/strategy/results.json")
+    lv.add_argument("--previous", help="last month's latest.json, for buy/sell lists")
+    lv.add_argument("--capital", type=float, help="default: capital from the search results")
+    lv.add_argument("--out", default="data/live")
+    lv.set_defaults(func=cmd_live)
+
+    tr = sub.add_parser("track", help="how the current holdings have done since the signal")
+    tr.add_argument("--latest", default="data/live/latest.json")
+    tr.add_argument("--out", default="data/live")
+    tr.set_defaults(func=cmd_track)
 
     a = sub.add_parser("audit", help="find impossible price moves; spot-check stocks")
     a.add_argument("--end")
