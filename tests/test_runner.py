@@ -70,3 +70,11 @@ def test_backtest_without_benchmark_explains(clean_dir, capsys):
     assert main(["--data-dir", str(clean_dir), "backtest", "--from", "2022-06-01",
                  "--end", "2024-12-31"]) == 1
     assert "0050" in capsys.readouterr().err
+
+
+def test_factor_command(clean_dir, capsys):
+    assert main(["--data-dir", str(clean_dir), "factor", "--from", "2022-01-01",
+                 "--end", "2024-12-31", "--groups", "2", "--min-avg-value", "0"]) in (0, 1)
+    out = capsys.readouterr()
+    # 5 synthetic stocks are too few to split: must explain, not crash
+    assert "原版" in out.out or "沒有足夠" in out.err

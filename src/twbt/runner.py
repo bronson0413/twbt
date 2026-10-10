@@ -12,7 +12,9 @@ import pandas as pd
 from .data.query import Data
 from .engine import BacktestConfig, Context, CostModel, MarketData, Result, run_backtest
 from .engine.schedule import monthly_on_or_after
+from .research.factor import factor_analysis, format_report
 from .strategies import buy_and_hold, equal_weight, revenue_momentum
+from .strategies.revenue_momentum import DEFAULT_EXCLUDED_INDUSTRIES, eligible, revenue_scores
 
 BENCHMARK = "0050"
 
@@ -25,6 +27,9 @@ class Settings:
     strategy_name: str = "revenue"
     top_n: int = 8
     months: int = 3
+    method: str = "sum"
+    min_consecutive: int = 3
+    exclude_construction: bool = True
     min_avg_value: float = 10_000_000
     rebalance_day: int = 11
     commission_discount: float = 1.0
@@ -39,11 +44,17 @@ class Settings:
         return BacktestConfig(capital=self.capital, costs=costs, lot_size=self.lot_size,
                               delist_recovery=self.delist_recovery)
 
+    @property
+    def excluded(self) -> tuple[str, ...]:
+        return DEFAULT_EXCLUDED_INDUSTRIES if self.exclude_construction else ()
+
     def strategy(self):
         if self.strategy_name == "equal":
             return equal_weight(min_avg_value=self.min_avg_value)
         return revenue_momentum(top_n=self.top_n, months=self.months,
-                                min_avg_value=self.min_avg_value)
+                                min_avg_value=self.min_avg_value, method=self.method,
+                                min_consecutive=self.min_consecutive,
+                                exclude_industries=self.excluded)
 
 
 def backtest(data_dir: str | Path, s: Settings) -> tuple[Result, Result]:
@@ -112,3 +123,38 @@ def format_summary(strat: Result, bench: Result) -> str:
         lines.append(f"注意：持有期間遇到 {len(delist)} 次下市，以最後收盤價結算"
                      f"（--delist-recovery 0 可看最壞情況）")
     return "\n".join(lines)
+
+
+# Signal variants compared by `twbt factor`: (label, method, min_consecutive, exclude_construction)
+FACTOR_VARIANTS = [
+    ("原版：單月年增率平均", "mean", 0, False),
+    ("改用 3 個月合計", "sum", 0, False),
+    ("合計 + 排除營建", "sum", 0, True),
+    ("合計 + 排除營建 + 連續 3 個月成長", "sum", 3, True),
+]
+
+
+def factor(data_dir: str | Path, s: Settings, groups: int = 5) -> str:
+    data = Data(data_dir)
+    market = MarketData.from_data(data, s.start, s.end, benchmarks=())
+    days = market.dates[(market.dates >= pd.Timestamp(s.start))
+                        & (market.dates <= pd.Timestamp(s.end))]
+    schedule = monthly_on_or_after(days, s.rebalance_day)
+    out = [f"期間 {s.start} ~ {s.end}，每月 {s.rebalance_day} 日後第一個交易日分組，"
+           f"持有到下一次；不計成本、收盤價對收盤價"]
+    for label, method, consec, excl in FACTOR_VARIANTS:
+        banned = DEFAULT_EXCLUDED_INDUSTRIES if excl else ()
+
+        def scorer(ctx, method=method, consec=consec):
+            return revenue_scores(ctx, s.months, method=method, min_consecutive=consec)
+
+        def universe(ctx, banned=banned):
+            return eligible(ctx, s.min_avg_value, exclude_industries=banned)
+
+        # The consecutive-growth filter removes stocks rather than ranking them,
+        # so too few may be left to split into groups: use fewer groups.
+        rep = factor_analysis(market, schedule, scorer, universe,
+                              groups=groups, min_stocks=groups * 10)
+        out.append("")
+        out.append(format_report(label, rep))
+    return "\n".join(out)

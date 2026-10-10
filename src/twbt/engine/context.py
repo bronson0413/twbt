@@ -26,6 +26,10 @@ class Context:
         return [sid for sid, good in zip(m.ids, ok, strict=True)
                 if good and sid in m.universe_ids]
 
+    def industry(self) -> pd.Series:
+        """Industry category per stock id ('' when unknown, e.g. delisted stocks)."""
+        return pd.Series(self._m.industry, dtype=object)
+
     def _window(self, arr: np.ndarray, days: int) -> pd.DataFrame:
         lo = max(0, self._t - days + 1)
         return pd.DataFrame(arr[lo : self._t + 1], index=self._m.dates[lo : self._t + 1],

@@ -72,3 +72,45 @@ def test_equal_weight_skips_illiquid():
     from twbt.strategies import equal_weight
     w = equal_weight()(ctx_with([]))
     assert w == pytest.approx({"A": 1 / 3, "B": 1 / 3, "C": 1 / 3})
+
+
+def _rows(sid, cur, last, year=2024, months=(1, 2, 3)):
+    out = []
+    for m, c, ly in zip(months, cur, last, strict=True):
+        for y, v in ((year - 1, ly), (year, c)):
+            out.append({"stock_id": sid, "revenue_year": y, "revenue_month": m, "revenue": v,
+                        "period": f"{y}-{m:02d}",
+                        "available_date": pd.Timestamp(y, m, 11) + pd.DateOffset(months=1)})
+    return out
+
+
+def test_sum_method_resists_tiny_base():
+    # A: one month vs a near-zero base (+4900%), other months shrinking
+    # B: steady +30%
+    rows = _rows("A", [500, 50, 50], [10, 100, 100]) + _rows("B", [130, 130, 130],
+                                                              [100, 100, 100])
+    ctx = ctx_with(rows)
+    mean = revenue_scores(ctx, method="mean")
+    total = revenue_scores(ctx, method="sum")
+    assert mean["A"] > mean["B"]                 # mean is fooled
+    assert total["A"] == pytest.approx(600 / 210 - 1)
+    assert total["B"] == pytest.approx(0.3)
+
+
+def test_consecutive_growth_filter():
+    rows = _rows("A", [200, 200, 90], [100, 100, 100]) + _rows("B", [110, 110, 110],
+                                                              [100, 100, 100])
+    s = revenue_scores(ctx_with(rows), min_consecutive=3)
+    assert list(s.index) == ["B"]                # A's latest month shrank
+
+
+def test_construction_excluded():
+    from twbt.engine import Context, MarketData
+    days = pd.bdate_range("2024-03-01", DAY)
+    px = pd.DataFrame([{"date": d, "stock_id": s, "open": 10, "high": 10, "low": 10,
+                        "close": 10, "value": 1e9} for d in days for s in ("A", "B")])
+    uni = pd.DataFrame({"stock_id": ["A", "B"], "industry": ["建材營造業", "半導體業"]})
+    rev = pd.DataFrame(revenue_rows("A", 5.0) + revenue_rows("B", 0.1))
+    ctx = Context(MarketData(px, uni, revenue=rev, trading_days=days), len(days) - 1)
+    assert revenue_momentum(top_n=2)(ctx) == {"B": 0.5}
+    assert set(revenue_momentum(top_n=2, exclude_industries=())(ctx)) == {"A", "B"}

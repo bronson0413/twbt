@@ -51,6 +51,10 @@ class MarketData:
         universe = universe.copy()
         universe["stock_id"] = universe["stock_id"].astype(str)
         self.universe_ids = set(universe["stock_id"]) & set(self.ids)
+        self.industry: dict[str, str] = (
+            dict(zip(universe["stock_id"], universe["industry"].fillna(""), strict=True))
+            if "industry" in universe else {}
+        )
         self.delist_idx = np.full(len(self.ids), len(days), dtype=int)
         if "delisted_date" in universe:
             for sid, d in zip(universe["stock_id"], universe["delisted_date"], strict=True):

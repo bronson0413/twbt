@@ -15,6 +15,7 @@ from .data.store import Manifest, RawStore
 from .data.update import Updater
 from .runner import Settings, format_summary
 from .runner import backtest as run_bt
+from .runner import factor as run_factor
 from .runner import signal as run_signal
 
 
@@ -67,7 +68,9 @@ def _settings(args: argparse.Namespace) -> Settings:
                  min_avg_value=args.min_avg_value, rebalance_day=args.rebalance_day,
                  commission_discount=args.discount, min_commission=args.min_fee,
                  slippage=args.slippage, lot_size=args.lot,
-                 delist_recovery=getattr(args, "delist_recovery", 1.0))
+                 delist_recovery=getattr(args, "delist_recovery", 1.0),
+                 method=args.method, min_consecutive=args.min_consecutive,
+                 exclude_construction=not args.keep_construction)
     s.start = getattr(args, "bt_start", args.start)
     if args.end:
         s.end = args.end
@@ -90,6 +93,11 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_factor(args: argparse.Namespace) -> int:
+    print(run_factor(_data_dir(args.data_dir), _settings(args), groups=args.groups))
+    return 0
+
+
 def cmd_signal(args: argparse.Namespace) -> int:
     table = run_signal(_data_dir(args.data_dir), _settings(args))
     print(f"資料日期 {table.attrs['date']}，資金 {args.capital:,.0f} 的目標持股：")
@@ -108,6 +116,12 @@ def _strategy_args(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--strategy", choices=["revenue", "equal"], default="revenue",
                     help="revenue = monthly revenue momentum; equal = all liquid stocks (baseline)")
     sp.add_argument("--top-n", type=int, default=8, help="number of stocks to hold")
+    sp.add_argument("--method", choices=["sum", "mean"], default="sum",
+                    help="sum = N-month total vs last year; mean = average of monthly YoY")
+    sp.add_argument("--min-consecutive", type=int, default=3,
+                    help="require the last K monthly YoY rates > 0 (0 = off)")
+    sp.add_argument("--keep-construction", action="store_true",
+                    help="don't exclude 建材營造 stocks")
     sp.add_argument("--months", type=int, default=3, help="months of YoY growth to average")
     sp.add_argument("--min-avg-value", type=float, default=10_000_000,
                     help="min 20-day average traded value, NT$")
@@ -145,6 +159,12 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--delist-recovery", type=float, default=1.0)
     b.add_argument("--no-save", action="store_true", help="don't write data/results/")
     b.set_defaults(func=cmd_backtest)
+
+    f = sub.add_parser("factor", help="quintile / rank-IC analysis of revenue signal variants")
+    _strategy_args(f)
+    f.add_argument("--from", dest="bt_start", default="2012-01-01")
+    f.add_argument("--groups", type=int, default=5)
+    f.set_defaults(func=cmd_factor)
 
     g = sub.add_parser("signal", help="this month's target portfolio (for paper trading)")
     _strategy_args(g)
