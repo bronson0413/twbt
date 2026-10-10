@@ -130,3 +130,27 @@ def test_track_reports_holdings_since_signal(search, search_dir, tmp_path):
     text = track(search_dir, tmp_path / "old.json", tmp_path / "live")
     assert "持股等權重報酬" in text and "nan" not in text.lower()
     assert all(h["stock_id"] in text for h in latest["holdings"])
+
+
+def test_cli_default_holdings_come_from_config(monkeypatch):
+    """The CLI once defaulted to 30 holdings and silently overrode the config's 10."""
+    import twbt.research.search as search_mod
+    from twbt import cli
+
+    seen = {}
+
+    def fake_run(data, cfg, log=None, only=None):
+        seen["n"] = cfg.n
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(search_mod, "run_search", fake_run)
+    monkeypatch.setattr(cli, "Data", lambda root: None)
+    assert cli.main(["search"]) == 1
+    assert seen["n"] == search_mod.SearchConfig().n == 10
+
+
+def test_inspect_runs_on_synthetic_data(search_dir):
+    from twbt.research.inspect import inspect
+
+    text = inspect(Data(search_dir), ["VALUE"], start="2019-01-01", end="2020-12-31")
+    assert "VALUE top-30" in text and "averages per year" in text

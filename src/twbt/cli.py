@@ -123,7 +123,9 @@ def cmd_research(args: argparse.Namespace) -> int:
 def cmd_search(args: argparse.Namespace) -> int:
     from .research.search import SearchConfig, run_search, save
 
-    cfg = SearchConfig(split=args.split, end=args.end, n=args.n)
+    cfg = SearchConfig(split=args.split, end=args.end)
+    if args.n:
+        cfg.n = args.n
     only = args.only.upper().split(",") if args.only else None
     res = run_search(Data(_data_dir(args.data_dir)), cfg, log=lambda m: print(m, flush=True),
                      only=only)
@@ -145,6 +147,14 @@ def cmd_track(args: argparse.Namespace) -> int:
     from .live import track
 
     print(track(_data_dir(args.data_dir), args.latest, args.out))
+    return 0
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    from .research.inspect import inspect
+
+    names = [x.strip().upper() for x in args.names.split(",") if x.strip()]
+    print(inspect(Data(_data_dir(args.data_dir)), names, end=args.end or "2022-12-31"))
     return 0
 
 
@@ -258,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("search", help="compare ten candidate signals, pick one to trade")
     s.add_argument("--split", default="2023-01-01", help="out-of-sample start")
     s.add_argument("--end", help="default: last price date")
-    s.add_argument("--n", type=int, default=30, help="stocks held")
+    s.add_argument("--n", type=int, help="stocks held (default: SearchConfig, 10)")
     s.add_argument("--only", help="comma-separated candidates, e.g. value,inst (quick check)")
     s.add_argument("--out", default="docs/strategy")
     s.set_defaults(func=cmd_search)
@@ -274,6 +284,11 @@ def main(argv: list[str] | None = None) -> int:
     tr.add_argument("--latest", default="data/live/latest.json")
     tr.add_argument("--out", default="data/live")
     tr.set_defaults(func=cmd_track)
+
+    ins = sub.add_parser("inspect", help="valuation data sanity and what signals pick")
+    ins.add_argument("--names", default="qv,yield,value")
+    ins.add_argument("--end", help="default 2022-12-31 (in-sample only)")
+    ins.set_defaults(func=cmd_inspect)
 
     a = sub.add_parser("audit", help="find impossible price moves; spot-check stocks")
     a.add_argument("--end")
