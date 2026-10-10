@@ -46,6 +46,8 @@ class Settings:
 def backtest(data_dir: str | Path, s: Settings) -> tuple[Result, Result]:
     data = Data(data_dir)
     market = MarketData.from_data(data, s.start, s.end, benchmarks=(BENCHMARK,))
+    if BENCHMARK not in market.col:
+        raise RuntimeError(f"基準 {BENCHMARK} 還沒有價格資料（下載尚未完成），請等下載完再回測")
     days = market.dates[(market.dates >= pd.Timestamp(s.start))
                         & (market.dates <= pd.Timestamp(s.end))]
     schedule = monthly_on_or_after(days, s.rebalance_day)

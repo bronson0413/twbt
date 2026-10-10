@@ -149,7 +149,11 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (FileNotFoundError, RuntimeError) as exc:
+        print(f"錯誤：{exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

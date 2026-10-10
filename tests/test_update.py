@@ -83,3 +83,9 @@ def test_single_failure_is_recorded_and_run_continues(server, tmp_path, fixed_no
     report = make_updater(server, tmp_path, fixed_now).run(datasets=[PRICE])
     assert [(d, k) for d, k, _ in report.failed] == [(PRICE.name, "1294")]
     assert Manifest(tmp_path).keys(PRICE.name) == {"0050", "2330", "9999"}  # retried next run
+
+
+def test_benchmarks_download_first(server, tmp_path, fixed_now):
+    make_updater(server, tmp_path, fixed_now).run()
+    first = next(r for r in server.requests if "data_id" in r)
+    assert first["data_id"] == "0050"

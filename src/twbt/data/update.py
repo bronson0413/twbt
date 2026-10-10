@@ -148,15 +148,15 @@ class Updater:
         delisted = dict(zip(uni["stock_id"], uni["delisted_date"].notna(), strict=True))
         datasets = list(datasets)
 
-        jobs = [(sid, spec, delisted[sid]) for sid in uni["stock_id"] for spec in datasets]
-        # Benchmarks (ETFs) are outside the stock universe but needed for
-        # comparison: prices and dividends only.
-        jobs += [
+        # Benchmarks (ETFs) are outside the stock universe but every backtest
+        # compares against them, so they go first: prices and dividends only.
+        jobs = [
             (sid, spec, False)
             for sid in self.benchmarks
             for spec in datasets
             if spec in BENCHMARK_DATASETS
         ]
+        jobs += [(sid, spec, delisted[sid]) for sid in uni["stock_id"] for spec in datasets]
         tasks: list[tuple[DatasetSpec, str, str]] = []
         for sid, spec, is_delisted in jobs:
             start = self.plan(spec, sid, is_delisted)

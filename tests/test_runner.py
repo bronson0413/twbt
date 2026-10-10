@@ -62,3 +62,11 @@ def test_signal_command(clean_dir, capsys):
                  "--top-n", "2", "--capital", "250000"]) == 0
     out = capsys.readouterr().out
     assert "2330" in out and "2454" in out and "1101" not in out
+
+
+def test_backtest_without_benchmark_explains(clean_dir, capsys):
+    px = pd.read_parquet(clean_dir / "clean" / "prices.parquet")
+    px[px["stock_id"] != "0050"].to_parquet(clean_dir / "clean" / "prices.parquet")
+    assert main(["--data-dir", str(clean_dir), "backtest", "--from", "2022-06-01",
+                 "--end", "2024-12-31"]) == 1
+    assert "0050" in capsys.readouterr().err
