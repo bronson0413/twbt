@@ -211,6 +211,116 @@ def _is_summary(n: dict, g: int) -> str:
     return "；".join(parts)
 
 
+def _neutral_table(n: dict) -> str:
+    if "neutral" not in n:
+        return "（未執行）"
+    rows = ["| 期間 | Q5−Q1 月報酬 | t | Rank IC | IC t |", "|---|---|---|---|---|"]
+    for key, label in (("is", "樣本內"), ("oos", "樣本外"), ("full", "全期")):
+        s = n["neutral"][key]
+        rows.append(f"| {label} | {pct(s['top_minus_bottom_monthly'], True, 2)} | "
+                    f"{num(s['top_minus_bottom_tstat'])} | {num(s['ic_mean'], 3, True)} | "
+                    f"{num(s['ic_tstat'])} |")
+    return "\n".join(rows)
+
+
+def _regime_table(n: dict) -> str:
+    rows = ["| 市場 | 月數 | 全體平均月報酬 | Q5−Q1 月報酬 | t |", "|---|---|---|---|---|"]
+    for key, label in (("up", "上漲月"), ("down", "下跌月")):
+        r = n["regime"][key]
+        rows.append(f"| {label} | {r['months']} | {pct(r['universe'], True, 2)} | "
+                    f"{pct(r['spread'], True, 2)} | {num(r['t'])} |")
+    return "\n".join(rows)
+
+
+def _sig(t: float) -> str:
+    if t is None or (isinstance(t, float) and np.isnan(t)):
+        return "無法判斷"
+    return "顯著" if abs(t) >= 2 else "不顯著"
+
+
+def _conclusion(n: dict, res: StudyResult) -> str:
+    """Every qualitative word below is decided by the numbers, not written in advance."""
+    sel, g = n["selected"], res.cfg.groups
+    f, p = n["factor"][sel], n["portfolio"][sel]
+    eq, bm = n["portfolio"]["EQUAL"], n["portfolio"][BENCHMARK]
+    t_is, t_oos = f["is"]["top_minus_bottom_tstat"], f["oos"]["top_minus_bottom_tstat"]
+    liq_t = min(v["top_minus_bottom_tstat"] for v in n["liquidity"][sel].values())
+    ys = n["yearly_spread"]
+    pos = sum(v > 0.0005 for v in ys.values())
+
+    if t_is >= 2 and t_oos >= 2 and liq_t >= 2:
+        signal_head = "有效，而且在樣本外與各流動性層都成立"
+    elif t_is >= 2 and t_oos >= 2:
+        signal_head = "樣本內外都有效，但不是每個流動性層都成立"
+    elif t_is >= 2:
+        signal_head = "樣本內有效，樣本外沒有得到確認"
+    else:
+        signal_head = "證據不足"
+
+    a_is, a_oos = p["vs_equal_is"], p["vs_equal_oos"]
+    sig_is, sig_oos = a_is["t"] >= 2, a_oos["t"] >= 2
+    if sig_is and sig_oos:
+        port_head = "樣本內外都有顯著的超額報酬"
+    elif sig_oos:
+        port_head = "超額報酬只在樣本外顯著"
+    elif sig_is:
+        port_head = "超額報酬只在樣本內顯著，樣本外沒有延續"
+    else:
+        port_head = "超額報酬在樣本內外都不顯著"
+    riskier = p["full"]["vol"] > bm["full"]["vol"]
+
+    lines = [
+        "## 7. 結論",
+        "",
+        f"**訊號本身：{signal_head}。**",
+        f"- {ZH[sel]}的 Q{g}−Q1 價差：樣本內每月 {pct(f['is']['top_minus_bottom_monthly'], True, 2)}"
+        f"（t={num(t_is)}，{_sig(t_is)}），樣本外每月 {pct(f['oos']['top_minus_bottom_monthly'], True, 2)}"
+        f"（t={num(t_oos)}，{_sig(t_oos)}）。",
+        f"- 依流動性分三層、在每層內部重新分組，最小的 t 值為 {num(liq_t)}"
+        + ("，訊號不只是小型股效應。" if liq_t >= 2 else "，部分流動性層不顯著。"),
+        f"- 全期 {len(ys)} 年中有 {pos} 年 Q{g} 勝過 Q1。",
+    ]
+    if "neutral" in n:
+        nt = n["neutral"]["full"]["top_minus_bottom_tstat"]
+        lines.append(f"- 在每個產業內部重新排名後，全期 t={num(nt)}，"
+                     + ("訊號不是單純押對產業。" if nt >= 2 else "大部分效果可能來自產業選擇。"))
+    rd = n["regime"]
+    lines.append(f"- 下跌月（{rd['down']['months']} 個月）的價差每月 {pct(rd['down']['spread'], True, 2)}"
+                 f"（t={num(rd['down']['t'])}），上漲月 {pct(rd['up']['spread'], True, 2)}"
+                 f"（t={num(rd['up']['t'])}）。")
+    lines += [
+        "",
+        f"**可實際交易的 top-{n['main_n']} 組合（含成本）：{port_head}。**",
+        f"- 相對全體等權重指數（不計成本）的年化超額報酬：樣本內 {pct(a_is['active_return'], True)}"
+        f"（t={num(a_is['t'])}），樣本外 {pct(a_oos['active_return'], True)}（t={num(a_oos['t'])}）。",
+    ]
+    if eq["oos"]["cagr"] - eq["is"]["cagr"] > 0.05:
+        lines.append(
+            f"- 樣本外期間市場明顯較強：全體等權重年化 {pct(eq['oos']['cagr'])}（樣本內 "
+            f"{pct(eq['is']['cagr'])}），0050 {pct(bm['oos']['cagr'])}。組合樣本外年化 "
+            f"{pct(p['oos']['cagr'])} 有相當部分來自市場本身，不應當作未來可預期的報酬。")
+    lines += [
+        f"- 風險：全期年化波動 {pct(p['full']['vol'])}（0050 {pct(bm['full']['vol'])}），"
+        f"最大回撤 {pct(p['full']['max_dd'])}（0050 {pct(bm['full']['max_dd'])}）；"
+        f"Sharpe {num(p['full']['sharpe'])}，"
+        f"{'低於' if p['full']['sharpe'] < bm['full']['sharpe'] else '高於'} 0050 的 "
+        f"{num(bm['full']['sharpe'])}" + ("，波動明顯較大。" if riskier else "。"),
+    ]
+    per_order = res.cfg.capital / res.cfg.main_n
+    min_fee = res.cfg.costs.min_commission
+    lines += [
+        f"- 成本：以 {res.cfg.capital:,.0f} 元分成 {n['main_n']} 檔，每筆約 {per_order:,.0f} 元，"
+        f"最低手續費 {min_fee:.0f} 元約占 {min_fee / per_order:.2%}"
+        + ("，高於 2.8 折後的費率，所以折扣幾乎沒有效果；本金越大，成本比例越低。"
+           if min_fee / per_order > res.cfg.costs.commission_rate * res.cfg.costs.commission_discount
+           else "。"),
+        "",
+        "**下一步**：累積更長的樣本外期間；以產業中性的版本建構組合，"
+        "並測試較大本金下的成本與容量。",
+    ]
+    return "\n".join(lines)
+
+
 def write_report(res: StudyResult, n: dict, out: Path) -> None:
     fig_quintiles(res, out / "quintiles.png")
     fig_equity(res, out / "equity.png")
@@ -307,11 +417,21 @@ def write_report(res: StudyResult, n: dict, out: Path) -> None:
 
 {_yearly_table(n)}
 
-### 5.3 持股數與手續費敏感度（{ZH[sel]}）
+### 5.3 是否只是押對產業？在每個產業內部重新排名
+
+{_neutral_table(n)}
+
+### 5.4 多頭月與空頭月（以全體等權重當月漲跌區分）
+
+{_regime_table(n)}
+
+### 5.5 持股數與手續費敏感度（{ZH[sel]}）
 
 {_grid_table(n)}
 
-## 6. 限制
+{_conclusion(n, res)}
+
+## 8. 限制
 
 - 營收修正沒有版本紀錄，只保留最新值；早期的申報時點只能依法定期限推估。
 - 現金股利在除息日入帳；未計股利稅、二代健保補充保費。
@@ -319,7 +439,7 @@ def write_report(res: StudyResult, n: dict, out: Path) -> None:
 - 下市以最後收盤價結算，對倒閉公司偏樂觀。
 - 只有一段樣本外期間（約 {(pd.Timestamp(n['last_date']) - pd.Timestamp(n['split'])).days / 365.25:.1f} 年），統計檢定力有限。
 
-## 7. 重現
+## 9. 重現
 
 ```bash
 twbt update && twbt build

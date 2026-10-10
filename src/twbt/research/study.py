@@ -64,6 +64,21 @@ class StudyConfig:
                                           slippage=0.001))
 
 
+def industry_neutral(scorer: Callable[[Context], pd.Series], min_group: int = 5):
+    """Rank a score within each industry, so the signal can't be a sector bet.
+
+    Industries with fewer than ``min_group`` scored stocks are dropped.
+    """
+    def score(ctx: Context) -> pd.Series:
+        s = scorer(ctx)
+        ind = ctx.industry().reindex(s.index).fillna("")
+        df = pd.DataFrame({"s": s, "ind": ind})
+        df = df[(df["ind"] != "") & (df.groupby("ind")["s"].transform("size") >= min_group)]
+        return df.groupby("ind")["s"].rank(pct=True)
+
+    return score
+
+
 def signals(cfg: StudyConfig) -> dict[str, Callable[[Context], pd.Series]]:
     def rev(ctx):
         return revenue_scores(ctx, months=3, method="sum")
@@ -131,6 +146,7 @@ class StudyResult:
     grid: pd.DataFrame
     selected: str
     last_date: pd.Timestamp
+    neutral: FactorReport | None = None
     data_fixes: int = 0
     stock_days: int = 0
 
@@ -204,12 +220,15 @@ def run_study(data: Data, cfg: StudyConfig, log: Callable[[str], None] = print) 
                          "cagr_oos": curve_stats(oos)["cagr"],
                          "costs_total": res.summary()["total_costs"],
                          "turnover": res.summary()["turnover_per_year"]})
+    log(f"industry-neutral factor analysis {selected}")
+    neutral = factor_analysis(market, schedule, industry_neutral(sigs[selected]), universe,
+                              groups=cfg.groups)
     fixes = int(data.sql("SELECT COUNT(*) AS n FROM corporate_actions "
                          "WHERE kind = 'data_fix' AND date >= ?", [pd.Timestamp(cfg.start)])
                 .iloc[0, 0])
     stock_days = int(np.isfinite(market.close[market.index_of(cfg.start):]).sum())
     return StudyResult(cfg, factor, liquidity, portfolios, pd.DataFrame(rows), selected,
-                       market.dates[-1], fixes, stock_days)
+                       market.dates[-1], neutral, fixes, stock_days)
 
 
 # -- numbers for the report -----------------------------------------------------
@@ -240,6 +259,22 @@ def collect(res: StudyResult) -> dict:
             "final": float(r.equity.iloc[-1]),
         }
     out["grid"] = res.grid.to_dict(orient="records")
+    if res.neutral is not None:
+        ins, oos = split_factor(res.neutral, split)
+        out["neutral"] = {"full": res.neutral.summary(), "is": ins.summary(),
+                          "oos": oos.summary()}
+    d = res.factor[res.selected].by_date
+    spread = d[f"Q{res.cfg.groups}"] - d["Q1"]
+    out["regime"] = {}
+    for label, mask in (("up", d["universe"] > 0), ("down", d["universe"] <= 0)):
+        x = spread[mask]
+        out["regime"][label] = {
+            "months": int(mask.sum()),
+            "universe": float(d.loc[mask, "universe"].mean()),
+            "spread": float(x.mean()),
+            "t": float(x.mean() / x.std() * np.sqrt(len(x))) if len(x) > 1 and x.std() > 0
+            else np.nan,
+        }
     sel = res.factor[res.selected].by_date
     out["yearly_spread"] = {
         int(y): float(v) for y, v in

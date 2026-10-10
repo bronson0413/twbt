@@ -93,3 +93,25 @@ def test_active_stats():
     base = pd.Series(np.exp(np.cumsum(np.full(500, 0.0004))), index=idx)
     same = active_stats(base, base)
     assert same["active_return"] == pytest.approx(0) and np.isnan(same["ir"])
+
+
+def test_industry_neutral_ranks_within_industry():
+    from twbt.research.study import industry_neutral
+
+    class Ctx:
+        def industry(self):
+            return pd.Series({"A": "x", "B": "x", "C": "y", "D": "y", "E": "z"})
+
+    raw = pd.Series({"A": 1.0, "B": 2.0, "C": 100.0, "D": 200.0, "E": 5.0})
+    s = industry_neutral(lambda ctx: raw, min_group=2)(Ctx())
+    assert s["B"] == s["D"] == 1.0 and s["A"] == s["C"] == 0.5  # scale-free within industry
+    assert "E" not in s.index                                  # industry too small
+
+
+def test_report_has_robustness_sections(study):
+    _, n, out = study
+    text = (out / "REPORT.md").read_text(encoding="utf-8")
+    for heading in ("產業內部重新排名", "多頭月與空頭月", "## 7. 結論"):
+        assert heading in text
+    assert n["regime"]["up"]["months"] + n["regime"]["down"]["months"] == \
+        n["factor"][n["selected"]]["full"]["periods"]
