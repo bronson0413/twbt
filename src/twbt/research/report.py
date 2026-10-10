@@ -94,8 +94,11 @@ def fig_equity(res: StudyResult, path: Path) -> None:
     ax.legend(frameon=False, fontsize=8, labelcolor=INK_2, loc="upper left")
     ax.set_title(f"Top-{res.cfg.main_n} {NAMES[res.selected]} portfolio vs baselines "
                  "(after costs)", fontsize=10, color=INK, loc="left")
-    lo, hi = ax.get_xlim()
-    ax.set_xlim(right=hi + (hi - lo) * 0.22)  # room for end labels
+    first, last = (res.portfolios[res.selected].equity.index[[0, -1]])
+    years = pd.date_range(first.normalize() + pd.offsets.YearBegin(0), last, freq="2YS")
+    ax.set_xticks(years, [str(d.year) for d in years])
+    span = last - first
+    ax.set_xlim(first - span * 0.01, last + span * 0.20)  # room for end labels
     fig.tight_layout()
     fig.savefig(path, facecolor=SURFACE)
     plt.close(fig)
@@ -230,6 +233,18 @@ def _regime_table(n: dict) -> str:
         rows.append(f"| {label} | {r['months']} | {pct(r['universe'], True, 2)} | "
                     f"{pct(r['spread'], True, 2)} | {num(r['t'])} |")
     return "\n".join(rows)
+
+
+def _sanity(n: dict) -> str:
+    bad = {k: v for k, v in n["impossible_days"].items() if v}
+    total = sum(len(v) for v in bad.values())
+    if not total:
+        return ("每個組合每天的漲跌幅都在單日漲跌幅限制內（|日報酬| ≤ 11%）。"
+                "全部持股都受 ±10% 限制，超過這個幅度代表資料或引擎有錯。")
+    lines = [f"**警告：有 {total} 個交易日的組合日報酬超過 ±11%，結果不可信，需先檢查：**"]
+    for k, v in bad.items():
+        lines.append(f"- {ZH[k]}：" + "、".join(f"{x['date']} {x['return']:+.1%}" for x in v[:5]))
+    return "\n".join(lines)
 
 
 def _sig(t: float) -> str:
@@ -385,6 +400,10 @@ def write_report(res: StudyResult, n: dict, out: Path) -> None:
 - 誠實揭露：在這份正式研究之前，曾用全期資料做過探索，並據此決定了三件事：
   營收用「3 個月合計」而非單月年增率平均、排除建材營造業、持股 30 檔而非 8 檔。
   因此樣本外期間並非完全沒被看過，結果應視為偏樂觀的上限。
+
+### 資料檢查
+
+{_sanity(n)}
 
 ## 3. 訊號檢驗：分組報酬
 

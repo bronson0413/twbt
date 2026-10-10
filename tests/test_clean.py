@@ -188,3 +188,24 @@ def test_build_includes_data_fixes(server, tmp_path, fixed_now):
     fix = ev[ev["kind"] == "data_fix"]
     jan = fix[fix["date"] == days[6]]
     assert len(jan) == 1 and jan["factor"].iloc[0] == pytest.approx(0.5)
+
+
+def test_same_adjustment_in_two_tables_counts_once():
+    # real case: 5314 on 2025-03-31, par value 10 → 0.5, in both split and par-value tables
+    split = pd.DataFrame([{"date": "2025-03-31", "stock_id": "5314", "type": "分割",
+                           "before_price": 1390.0, "after_price": 69.5}])
+    par = pd.DataFrame([{"date": "2025-03-31", "stock_id": "5314", "stock_name": "世紀",
+                         "before_close": 1390.0, "after_ref_close": 69.5}])
+    ev = clean_corporate_actions(pd.DataFrame(), pd.DataFrame(), split, par)
+    assert len(ev) == 1 and ev["factor"].iloc[0] == pytest.approx(20)
+
+
+def test_sequential_events_on_one_day_are_kept():
+    # a dividend and a reduction measured from different bases are two real steps
+    div = pd.DataFrame([{"date": "2024-05-01", "stock_id": "1", "before_price": 100.0,
+                         "reference_price": 95.0, "stock_or_cache_dividend": "息"}])
+    red = pd.DataFrame([{"date": "2024-05-01", "stock_id": "1",
+                         "ClosingPriceonTheLastTradingDay": 95.0,
+                         "PostReductionReferencePrice": 190.0}])
+    ev = clean_corporate_actions(div, red, pd.DataFrame(), pd.DataFrame())
+    assert len(ev) == 2

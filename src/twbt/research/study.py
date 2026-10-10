@@ -42,6 +42,7 @@ from ..strategies import (
 from .factor import FactorReport, factor_analysis
 
 BENCHMARK = "0050"
+IMPOSSIBLE_DAY = 0.11  # daily price limit 10% + rounding/slippage headroom
 TRADING_DAYS = 245
 
 
@@ -259,6 +260,13 @@ def collect(res: StudyResult) -> dict:
             "final": float(r.equity.iloc[-1]),
         }
     out["grid"] = res.grid.to_dict(orient="records")
+    # A long-only portfolio of stocks limited to ±10% a day cannot move more than
+    # that in a day. A larger move means bad data or an engine error.
+    out["impossible_days"] = {
+        name: [{"date": str(d.date()), "return": float(r)}
+               for d, r in r_.equity.pct_change().dropna().items() if abs(r) > IMPOSSIBLE_DAY]
+        for name, r_ in res.portfolios.items()
+    }
     if res.neutral is not None:
         ins, oos = split_factor(res.neutral, split)
         out["neutral"] = {"full": res.neutral.summary(), "is": ins.summary(),

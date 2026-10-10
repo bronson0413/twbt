@@ -115,3 +115,9 @@ def test_report_has_robustness_sections(study):
         assert heading in text
     assert n["regime"]["up"]["months"] + n["regime"]["down"]["months"] == \
         n["factor"][n["selected"]]["full"]["periods"]
+
+
+def test_report_states_sanity_check(study):
+    _, n, out = study
+    assert all(v == [] for v in n["impossible_days"].values())
+    assert "漲跌幅限制內" in (out / "REPORT.md").read_text(encoding="utf-8")

@@ -218,7 +218,31 @@ def clean_corporate_actions(
     ev = ev[~bad].copy()
     ev["factor"] = ev["before_price"] / ev["reference_price"]
     ev = ev.drop_duplicates(["stock_id", "date", "kind"], keep="last")
+    ev = drop_overlapping_events(ev)
     return ev.sort_values(["stock_id", "date"]).reset_index(drop=True)[cols]
+
+
+def drop_overlapping_events(ev: pd.DataFrame, tolerance: float = 0.005) -> pd.DataFrame:
+    """Keep one event when several tables describe the same price adjustment.
+
+    Every event table reports its adjustment against the previous close. Two
+    events on the same stock and day with the same ``before_price`` are
+    therefore two descriptions of one adjustment, not two steps — applying both
+    multiplies shares twice (seen in real data: a par-value change recorded in
+    both the split and the par-value tables, a 20× change counted as 400×).
+    The event with the largest adjustment is kept.
+    """
+    if ev.empty:
+        return ev
+    ev = ev.assign(_size=np.abs(np.log(ev["factor"])))
+    ev = ev.sort_values(["stock_id", "date", "_size"], ascending=[True, True, False])
+    first_before = ev.groupby(["stock_id", "date"])["before_price"].transform("first")
+    is_first = ~ev.duplicated(["stock_id", "date"], keep="first")
+    same_basis = (ev["before_price"] / first_before - 1).abs() < tolerance
+    drop = ~is_first & same_basis
+    if drop.any():
+        log.warning("dropped %d events overlapping another event on the same day", int(drop.sum()))
+    return ev[~drop].drop(columns="_size")
 
 
 def adjusted_close(prices: pd.DataFrame, actions: pd.DataFrame) -> pd.Series:
