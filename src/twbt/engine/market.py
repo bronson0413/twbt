@@ -91,7 +91,7 @@ class MarketData:
         data: Data,
         start: str,
         end: str,
-        lookback_days: int = 400,
+        lookback_days: int = 420,
         benchmarks: Iterable[str] = ("0050",),
     ) -> MarketData:
         """Load [start - lookback, end] so strategies can look back from day one."""
@@ -111,6 +111,28 @@ class MarketData:
             actions=data.corporate_actions(load_from, end),
             trading_days=data.trading_days(load_from, end),
         )
+
+    @property
+    def tri(self) -> np.ndarray:
+        """Total return index per stock (dividends reinvested), ``[day, stock]``.
+
+        Days without a quote carry the last price; corporate-action factors are
+        applied on the event day, so over any window the ratio is the holder's
+        true return. After delisting the value stays flat (last price recovered).
+        Computed once and cached.
+        """
+        if getattr(self, "_tri", None) is None:
+            close = pd.DataFrame(self.close).ffill().to_numpy()
+            factor = np.ones_like(close)
+            for t, events in self.actions_on.items():
+                for col, *_rest, f in events:
+                    factor[t, col] *= f
+            ratio = np.ones_like(close)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                ratio[1:] = close[1:] / close[:-1] * factor[1:]
+            ratio[~np.isfinite(ratio)] = 1.0
+            self._tri = np.cumprod(ratio, axis=0)
+        return self._tri
 
     def index_of(self, date) -> int:
         """Index of the first trading day on or after ``date``."""

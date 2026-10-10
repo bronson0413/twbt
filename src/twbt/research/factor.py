@@ -28,22 +28,8 @@ Universe = Callable[[Context], list[str]]
 
 
 def total_return_index(market: MarketData) -> np.ndarray:
-    """Cumulative total return per stock (dividends reinvested), ``[day, stock]``.
-
-    Days without a quote carry the last price; corporate-action factors are
-    applied on the event day, so over any window the product is the holder's
-    true return. After delisting the value stays flat (last price recovered).
-    """
-    close = pd.DataFrame(market.close).ffill().to_numpy()
-    factor = np.ones_like(close)
-    for t, events in market.actions_on.items():
-        for col, *_rest, f in events:
-            factor[t, col] *= f
-    ratio = np.ones_like(close)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        ratio[1:] = close[1:] / close[:-1] * factor[1:]
-    ratio[~np.isfinite(ratio)] = 1.0
-    return np.cumprod(ratio, axis=0)
+    """See :attr:`MarketData.tri`."""
+    return market.tri
 
 
 @dataclass
@@ -95,7 +81,7 @@ def factor_analysis(
     groups: int = 5,
     min_stocks: int = 50,
 ) -> FactorReport:
-    tri = total_return_index(market)
+    tri = market.tri
     n_days = len(market.dates)
     idx = sorted({t for t in (market.index_of(d) for d in signal_dates) if t < n_days})
     rows = []

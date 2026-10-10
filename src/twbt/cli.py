@@ -11,6 +11,7 @@ from pathlib import Path
 from .data.clean import build
 from .data.client import FinMindClient
 from .data.datasets import BY_NAME, PER_STOCK_DATASETS
+from .data.query import Data
 from .data.store import Manifest, RawStore
 from .data.update import Updater
 from .runner import Settings, format_summary
@@ -98,6 +99,16 @@ def cmd_factor(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_research(args: argparse.Namespace) -> int:
+    from .research.study import StudyConfig, run_study, save
+
+    cfg = StudyConfig(split=args.split, end=args.end)
+    res = run_study(Data(_data_dir(args.data_dir)), cfg, log=lambda m: print(m, flush=True))
+    numbers = save(res, args.out)
+    print(f"selected {numbers['selected']}; report written to {args.out}/REPORT.md")
+    return 0
+
+
 def cmd_signal(args: argparse.Namespace) -> int:
     table = run_signal(_data_dir(args.data_dir), _settings(args))
     print(f"資料日期 {table.attrs['date']}，資金 {args.capital:,.0f} 的目標持股：")
@@ -165,6 +176,12 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--from", dest="bt_start", default="2012-01-01")
     f.add_argument("--groups", type=int, default=5)
     f.set_defaults(func=cmd_factor)
+
+    r = sub.add_parser("research", help="full study: in/out-of-sample, robustness, report")
+    r.add_argument("--split", default="2023-01-01", help="out-of-sample start")
+    r.add_argument("--end", help="default: last price date")
+    r.add_argument("--out", default="docs/research")
+    r.set_defaults(func=cmd_research)
 
     g = sub.add_parser("signal", help="this month's target portfolio (for paper trading)")
     _strategy_args(g)

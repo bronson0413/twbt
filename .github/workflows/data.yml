@@ -1,8 +1,7 @@
 # Downloads FinMind data on GitHub's machines, so no local computer is needed.
 #
-# * Runs every 6 hours. Each run downloads for up to ~5.3 hours, then stops
-#   cleanly; progress is kept in the Actions cache and the next run resumes.
-#   The first full download therefore takes about 3–4 runs.
+# * Runs daily. Each run downloads for up to ~5.3 hours, then stops cleanly;
+#   progress is kept in the Actions cache and the next run resumes.
 # * After that, --min-age-hours 600 makes runs no-ops until data is ~25 days
 #   old, i.e. one refresh a month (enough for monthly rebalancing).
 # * The clean layer is uploaded as the `clean-data` artifact after every run.
@@ -17,13 +16,17 @@ name: data
 
 on:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 1 * * *"  # daily 09:17 Taipei; data refreshes ~monthly
   workflow_dispatch:
     inputs:
       download:
         description: "Download from FinMind (false = only rebuild and report)"
         type: boolean
         default: true
+      research:
+        description: "Run the full research study (≈15 min) and publish it on `reports`"
+        type: boolean
+        default: false
       experiments:
         description: "Extra twbt runs for the report, separated by ';' (e.g. backtest --top-n 30)"
         type: string
@@ -46,7 +49,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e .
+      - run: pip install -e ".[research]"
 
       - name: Restore raw data
         uses: actions/cache/restore@v4
@@ -71,6 +74,10 @@ jobs:
           key: raw-${{ github.run_id }}
 
       - run: twbt build
+
+      - name: Research study
+        if: inputs.research
+        run: twbt research --out data/research
 
       - name: Report (run summary page + `reports` branch)
         if: always()
@@ -102,8 +109,14 @@ jobs:
             echo; echo '## signal'; echo '```'; twbt signal 2>&1 || echo "(exit $?)"; echo '```'
           } > report.md
           cat report.md >> "$GITHUB_STEP_SUMMARY"
-          dir=$(mktemp -d); cp report.md "$dir/"; cd "$dir"
-          git init -q -b reports && git add report.md
+          dir=$(mktemp -d); cp report.md "$dir/"
+          # keep the last published study unless this run produced a new one
+          if [ -d data/research ]; then cp -r data/research "$dir/research"; else
+            git fetch -q --depth 1 origin reports 2>/dev/null \
+              && git archive FETCH_HEAD research 2>/dev/null | tar -x -C "$dir" || true
+          fi
+          cd "$dir"
+          git init -q -b reports && git add -A
           git -c user.name=github-actions -c user.email=actions@github.com \
             commit -q -m "report ${{ github.run_id }}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" reports

@@ -39,6 +39,19 @@ class Context:
         """Raw closes for the last ``days`` trading days up to and including today."""
         return self._window(self._m.close, days)
 
+    def total_return(self, days: int = 1) -> pd.DataFrame:
+        """Total return index (dividend-adjusted) for the last ``days`` trading days.
+
+        Only ratios between two dates are meaningful, e.g. 12-month momentum is
+        ``tr.iloc[-22] / tr.iloc[-253] - 1``.
+        """
+        return self._window(self._m.tri, days)
+
+    def has_history(self, days: int) -> list[str]:
+        """Stocks quoted at least ``days`` trading days before today."""
+        m, t = self._m, self._t
+        return [sid for sid, f in zip(m.ids, m.first_quote, strict=True) if f <= t - days]
+
     def value(self, days: int = 1) -> pd.DataFrame:
         """Traded value (NT$) for the last ``days`` trading days."""
         return self._window(self._m.value, days)
