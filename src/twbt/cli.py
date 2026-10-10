@@ -85,6 +85,14 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     root = _data_dir(args.data_dir)
     strat, bench = run_bt(root, _settings(args))
     print(format_summary(strat, bench))
+    if args.biggest_days:
+        rets = strat.equity.pct_change().dropna()
+        top = rets.reindex(rets.abs().sort_values(ascending=False).index).head(args.biggest_days)
+        for date, r in top.items():
+            print(f"\n{date.date()} 組合 {r:+.2%}，主要貢獻：")
+            att = strat.attribution(date).head(5)
+            print(att.to_string(index=False, formatters={
+                "pct_of_equity": "{:+.2%}".format, "pnl": "{:,.0f}".format}))
     if args.no_save:
         return 0
     out = root / "results"
@@ -153,8 +161,10 @@ def cmd_signal(args: argparse.Namespace) -> int:
 def _strategy_args(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--end", help="default: today")
     sp.add_argument("--capital", type=float, default=250_000)
-    sp.add_argument("--strategy", choices=["revenue", "equal"], default="revenue",
-                    help="revenue = monthly revenue momentum; equal = all liquid stocks (baseline)")
+    sp.add_argument("--strategy", choices=["revenue", "combo", "momentum", "equal"],
+                    default="revenue",
+                    help="revenue = monthly revenue growth; combo = revenue + price momentum; "
+                         "momentum = 12-1 price momentum; equal = all liquid stocks (baseline)")
     sp.add_argument("--top-n", type=int, default=8, help="number of stocks to hold")
     sp.add_argument("--method", choices=["sum", "mean"], default="sum",
                     help="sum = N-month total vs last year; mean = average of monthly YoY")
@@ -198,6 +208,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="backtest start; revenue YoY needs ~15 months of history before it")
     b.add_argument("--delist-recovery", type=float, default=1.0)
     b.add_argument("--no-save", action="store_true", help="don't write data/results/")
+    b.add_argument("--biggest-days", type=int, default=0,
+                   help="explain the N largest daily moves by holding")
     b.set_defaults(func=cmd_backtest)
 
     f = sub.add_parser("factor", help="quintile / rank-IC analysis of revenue signal variants")

@@ -226,3 +226,11 @@ def test_zero_open_is_not_tradable():
     m = market({"A": [(0.0, 10, 10, 10), (0.0, 10, 10, 10), 10, 10, 10, 10]})
     r = bt(m, hold({"A": 1.0}), rebalance=DAYS[:2], capital=1000)  # day-1 fill fails
     assert r.trades.iloc[0]["date"] == DAYS[2]
+
+
+def test_attribution_finds_the_mover():
+    m = market({"A": [10, 10, 10, 15, 15, 15], "B": [10] * 6})
+    r = bt(m, hold({"A": 0.5, "B": 0.5}), capital=2000)
+    att = r.attribution(DAYS[3])
+    assert att.loc[0, "stock_id"] == "A" and att.loc[0, "pnl"] == pytest.approx(100 * 5)
+    assert att.loc[0, "pct_of_equity"] == pytest.approx(0.25)

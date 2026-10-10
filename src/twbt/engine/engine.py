@@ -52,6 +52,42 @@ class Result:
     trades: pd.DataFrame
     signals: list[tuple[pd.Timestamp, dict[str, float]]]
     config: BacktestConfig
+    # shares held at each day's close: {stock_id: shares}, one dict per day
+    positions: list[dict[str, float]] = field(default_factory=list)
+    market: MarketData | None = field(default=None, repr=False)
+
+    def attribution(self, date) -> pd.DataFrame:
+        """Each holding's contribution to the move from the previous close to ``date``'s close.
+
+        Contribution = shares held at the previous close × (close × event factor − previous
+        close). Trades made at the open are ignored, so it explains drift, not fills.
+        """
+        m = self.market
+        t = m.index_of(date) - m.index_of(self.equity.index[0])
+        if t <= 0:
+            raise ValueError("no previous day in the backtest")
+        g = m.index_of(date)
+        prev_pos = self.positions[t - 1]
+        factor = {m.ids[col]: f for col, *_r, f in m.actions_on.get(g, [])}
+        rows = []
+        for sid, sh in prev_pos.items():
+            c = m.col[sid]
+            p0 = self._last(c, g - 1)
+            p1 = m.close[g, c] if not np.isnan(m.close[g, c]) else p0
+            pnl = sh * (p1 * factor.get(sid, 1.0) - p0)
+            rows.append({"stock_id": sid, "shares": sh, "prev_close": p0, "close": p1,
+                         "event_factor": factor.get(sid, 1.0), "pnl": pnl})
+        df = pd.DataFrame(rows)
+        base = self.equity.iloc[t - 1]
+        if not df.empty:
+            df["pct_of_equity"] = df["pnl"] / base
+            df = df.sort_values("pnl", key=np.abs, ascending=False).reset_index(drop=True)
+        return df
+
+    def _last(self, col: int, t: int) -> float:
+        c = self.market.close[: t + 1, col]
+        valid = c[~np.isnan(c)]
+        return float(valid[-1]) if len(valid) else np.nan
 
     def summary(self, rf: float = 0.0) -> dict[str, float]:
         return metrics.summary(self.equity, self.trades, rf)
@@ -216,6 +252,7 @@ def run_backtest(
 
     pending: dict[str, float] | None = None
     signals: list[tuple[pd.Timestamp, dict[str, float]]] = []
+    positions: list[dict[str, float]] = []
     equity, cash = [], []
     for t in range(t0, t1):
         book.corporate_actions(t)
@@ -224,6 +261,8 @@ def run_backtest(
             book.rebalance(t, pending)
             pending = None
         equity.append(book.mark(t))
+        held = np.flatnonzero(book.shares)
+        positions.append({market.ids[c]: float(book.shares[c]) for c in held})
         cash.append(book.cash)
         date = market.dates[t]
         if date in rebal:
@@ -237,4 +276,6 @@ def run_backtest(
         trades=pd.DataFrame(book.log, columns=TRADE_COLUMNS),
         signals=signals,
         config=cfg,
+        positions=positions,
+        market=market,
     )

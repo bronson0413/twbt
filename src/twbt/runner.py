@@ -51,6 +51,12 @@ class Settings:
     def strategy(self):
         if self.strategy_name == "equal":
             return equal_weight(min_avg_value=self.min_avg_value)
+        if self.strategy_name in ("combo", "momentum"):
+            from .research.study import StudyConfig, signals
+            from .strategies import top_n
+            f = signals(StudyConfig())["COMBO" if self.strategy_name == "combo" else "MOM"]
+            return top_n(f, self.top_n, self.min_avg_value, self.excluded,
+                         name=self.strategy_name)
         return revenue_momentum(top_n=self.top_n, months=self.months,
                                 min_avg_value=self.min_avg_value, method=self.method,
                                 min_consecutive=self.min_consecutive,
