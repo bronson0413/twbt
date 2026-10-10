@@ -24,6 +24,10 @@ on:
         description: "Download from FinMind (false = only rebuild and report)"
         type: boolean
         default: true
+      experiments:
+        description: "Extra twbt runs for the report, separated by ';' (e.g. backtest --top-n 30)"
+        type: string
+        default: ""
 
 permissions:
   contents: write  # push the text report to the `reports` branch
@@ -70,6 +74,8 @@ jobs:
 
       - name: Report (run summary page + `reports` branch)
         if: always()
+        env:
+          EXPERIMENTS: ${{ inputs.experiments }}
         run: |
           {
             echo "# twbt report — run ${{ github.run_id }}, $(date -u +%Y-%m-%dT%H:%MZ)"
@@ -86,6 +92,13 @@ jobs:
             echo; echo '## baseline: all liquid stocks, equal weight, no commission or slippage'; echo '```'
             twbt backtest --no-save --strategy equal --discount 0 --min-fee 0 --slippage 0 2>&1 \
               || echo "(exit $?)"; echo '```'
+            IFS=';' read -ra runs <<< "$EXPERIMENTS"
+            for cmd in "${runs[@]}"; do
+              read -ra argv <<< "$cmd"
+              [ ${#argv[@]} -eq 0 ] && continue
+              echo; echo "## experiment: twbt ${argv[*]}"; echo '```'
+              twbt "${argv[@]}" 2>&1 || echo "(exit $?)"; echo '```'
+            done
             echo; echo '## signal'; echo '```'; twbt signal 2>&1 || echo "(exit $?)"; echo '```'
           } > report.md
           cat report.md >> "$GITHUB_STEP_SUMMARY"
