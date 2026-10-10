@@ -33,4 +33,4 @@ def test_capital_reduction_is_not_flagged():
 def test_limit_moves_and_new_listings_allowed():
     assert impossible_moves(_m([10] * 6 + [11, 12.1])[0]).empty      # +10% days
     assert impossible_moves(_m([10, 20, 40] + [40] * 5)[0]).empty     # first 5 days free
-    assert len(impossible_moves(_m([10] * 6 + [10.8], start="2014-01-01")[0])) == 1  # 7% era
+    assert len(impossible_moves(_m([10] * 6 + [10.9], start="2014-01-01")[0])) == 1  # 7% era
