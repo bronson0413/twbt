@@ -123,6 +123,7 @@ class MarketData:
         end: str,
         lookback_days: int = 420,
         benchmarks: Iterable[str] = ("0050",),
+        revenue_end: str | pd.Timestamp | None = None,
     ) -> MarketData:
         """Load [start - lookback, end] so strategies can look back from day one."""
         start_ts = pd.Timestamp(start)
@@ -139,7 +140,7 @@ class MarketData:
             universe=uni,
             revenue=data.sql("SELECT * FROM revenue WHERE available_date <= ? "
                              "ORDER BY stock_id, revenue_year, revenue_month",
-                             [pd.Timestamp(end)]),
+                             [pd.Timestamp(revenue_end or end)]),
             actions=data.corporate_actions(load_from, end),
             trading_days=data.trading_days(load_from, end),
             valuation=_between(data, "valuation", load_from, end, ids),

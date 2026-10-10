@@ -18,6 +18,10 @@ class Context:
         self._m = market
         self._t = t
         self.date: pd.Timestamp = market.dates[t]
+        # Revenue published up to this date is visible. Backtests keep it equal
+        # to ``date``; live runs set it to the run date, because revenue made
+        # public after the last downloaded price is still known when trading.
+        self.revenue_asof: pd.Timestamp = self.date
 
     def universe(self) -> list[str]:
         """Stocks that have traded by today and are not delisted (benchmarks excluded)."""
@@ -59,7 +63,7 @@ class Context:
     def revenue(self, months: int | None = None) -> pd.DataFrame:
         """Monthly revenue already public today; latest ``months`` per stock if given."""
         rev = self._m.revenue
-        df = rev[rev["available_date"] <= self.date]
+        df = rev[rev["available_date"] <= self.revenue_asof]
         if months is not None and not df.empty:
             df = (df.sort_values(["stock_id", "revenue_year", "revenue_month"])
                   .groupby("stock_id").tail(months))

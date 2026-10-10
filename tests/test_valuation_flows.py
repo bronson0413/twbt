@@ -72,3 +72,17 @@ def test_loss_maker_pe_is_not_filled_from_an_earlier_profitable_day():
     ctx = Context(MarketData(prices, uni, valuation=val, trading_days=days), 2)
     assert ctx.valuation("pe").empty
     assert ctx.valuation("pb").to_dict() == {"A": 1.4}
+
+
+def test_live_context_sees_revenue_published_after_last_price():
+    days = pd.bdate_range("2024-11-04", periods=4)  # last price 2024-11-07
+    prices = pd.DataFrame([{"date": d, "stock_id": "A", "open": 10.0, "high": 10.0, "low": 10.0,
+                            "close": 10.0, "volume": 1, "value": 10} for d in days])
+    uni = pd.DataFrame({"stock_id": ["A"], "industry": ["x"], "delisted_date": [pd.NaT]})
+    rev = pd.DataFrame({"stock_id": ["A"], "period": ["2024-10"], "revenue_year": [2024],
+                        "revenue_month": [10], "revenue": [1],
+                        "available_date": [pd.Timestamp("2024-11-11")]})
+    ctx = Context(MarketData(prices, uni, revenue=rev, trading_days=days), 3)
+    assert ctx.revenue().empty  # backtest: not public on the signal day
+    ctx.revenue_asof = pd.Timestamp("2024-11-12")
+    assert len(ctx.revenue()) == 1  # live run on the 12th: already public

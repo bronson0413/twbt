@@ -24,11 +24,13 @@ from .strategies import top_n
 
 
 def target(data: Data, strategy: str, n: int, capital: float,
-           min_avg_value: float = 10_000_000) -> dict:
+           min_avg_value: float = 10_000_000, today: str | None = None) -> dict:
     end = str(data.sql("SELECT MAX(date) AS d FROM prices")["d"].iloc[0].date())
-    market = MarketData.from_data(data, end, end, benchmarks=())
+    today_ts = pd.Timestamp(today or pd.Timestamp.now(tz="Asia/Taipei").date())
+    market = MarketData.from_data(data, end, end, benchmarks=(), revenue_end=today_ts)
     t = len(market.dates) - 1
     ctx = Context(market, t)
+    ctx.revenue_asof = max(ctx.date, today_ts)
     scorer = candidates()[strategy]
     weights = top_n(scorer, n, min_avg_value, name=strategy)(ctx)
     scores = scorer(ctx)
@@ -42,6 +44,7 @@ def target(data: Data, strategy: str, n: int, capital: float,
                      "weight": float(w), "close": px,
                      "shares": int(w * capital // px), "score": float(scores.get(sid, 0))})
     return {"date": ctx.date.date().isoformat(), "strategy": strategy, "n": n,
+            "revenue_asof": ctx.revenue_asof.date().isoformat(),
             "capital": capital, "holdings": rows}
 
 
@@ -62,7 +65,8 @@ def render(new: dict, old: dict | None) -> str:
     lines = [
         f"# {new['date'][:7]} 調整持股（{new['strategy']}：{LABELS.get(new['strategy'], '')}）",
         "",
-        f"資料日期 {new['date']}。請在下一個交易日開盤下單；股數以資金 {new['capital']:,.0f} 元、"
+        f"價格資料到 {new['date']}，月營收含 {new.get('revenue_asof', new['date'])} 以前已公布者。"
+        f"請在下一個交易日開盤下單；股數以資金 {new['capital']:,.0f} 元、"
         f"每檔約 {per:,.0f} 元、資料日收盤價估算。"
         f"若帳戶總值已不同，每檔金額改為「總值 ÷ {new['n']}」。",
         "",
@@ -94,11 +98,12 @@ def render(new: dict, old: dict | None) -> str:
 
 
 def run(data_dir: str | Path, results: str | Path, out: str | Path,
-        previous: str | Path | None = None, capital: float | None = None) -> dict:
+        previous: str | Path | None = None, capital: float | None = None,
+        today: str | None = None) -> dict:
     res = json.loads(Path(results).read_text(encoding="utf-8"))
     strategy, n = res["selected"], int(res["n"])
     cap = capital if capital is not None else float(res.get("capital", 300_000))
-    new = target(Data(data_dir), strategy, n, cap)
+    new = target(Data(data_dir), strategy, n, cap, today=today)
     old = None
     if previous and Path(previous).exists():
         old = json.loads(Path(previous).read_text(encoding="utf-8"))
