@@ -98,7 +98,8 @@ class MarketData:
         start_ts = pd.Timestamp(start)
         load_from = start_ts - pd.Timedelta(days=lookback_days)
         uni = data.sql(
-            "SELECT * FROM universe WHERE delisted_date IS NULL OR delisted_date >= ?",
+            "SELECT * FROM universe WHERE delisted_date IS NULL OR delisted_date >= ? "
+            "ORDER BY stock_id",
             [load_from],
         )
         ids = list(uni["stock_id"]) + list(benchmarks)
@@ -106,7 +107,8 @@ class MarketData:
         return cls(
             prices=prices,
             universe=uni,
-            revenue=data.sql("SELECT * FROM revenue WHERE available_date <= ?",
+            revenue=data.sql("SELECT * FROM revenue WHERE available_date <= ? "
+                             "ORDER BY stock_id, revenue_year, revenue_month",
                              [pd.Timestamp(end)]),
             actions=data.corporate_actions(load_from, end),
             trading_days=data.trading_days(load_from, end),

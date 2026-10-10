@@ -89,7 +89,8 @@ def factor_analysis(
         ctx = Context(market, t0)
         ok = universe(ctx)
         scores = scorer(ctx)
-        scores = scores[scores.index.isin(ok)].dropna()
+        # sorted so rank(method='first') breaks ties the same way on every run
+        scores = scores[scores.index.isin(ok)].dropna().sort_index()
         if len(scores) < min_stocks:
             continue
         cols = [market.col[s] for s in scores.index]

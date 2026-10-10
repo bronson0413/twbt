@@ -123,9 +123,11 @@ def revenue_momentum(
         scores = revenue_scores(ctx, months, max_staleness_months, method,
                                 min_consecutive, min_base)
         ok = set(eligible(ctx, min_avg_value, value_days, exclude_industries))
-        picks = scores[scores.index.isin(ok)].sort_values(ascending=False).head(top_n)
+        from .combo import rank_top  # local: combo imports this module
+
+        picks = rank_top(scores[scores.index.isin(ok)], top_n)
         # 1/top_n each: if fewer stocks qualify, the rest stays in cash
-        return {s: 1.0 / top_n for s in picks.index}
+        return {s: 1.0 / top_n for s in picks}
 
     strategy.__name__ = f"revenue_momentum_top{top_n}_{months}m_{method}"
     return strategy

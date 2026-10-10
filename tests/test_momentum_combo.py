@@ -55,3 +55,10 @@ def test_top_n_equal_weights_best_scores():
     scores = pd.Series({"A": 1, "B": 4, "C": 3, "D": 2})
     w = top_n(lambda ctx: scores, n=2)(Context(m, 29))
     assert w == {"B": 0.5, "C": 0.5}
+
+
+def test_rank_top_breaks_ties_by_id_regardless_of_order():
+    from twbt.strategies.combo import rank_top
+    s = pd.Series({"B": 0.5, "A": 0.5, "D": 0.9, "C": 0.5})
+    assert rank_top(s, 3) == ["D", "A", "B"]
+    assert rank_top(s.sample(frac=1, random_state=3), 3) == ["D", "A", "B"]

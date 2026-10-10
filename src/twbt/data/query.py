@@ -89,6 +89,7 @@ class Data:
 
     def corporate_actions(self, start: str | pd.Timestamp, end: str | pd.Timestamp) -> pd.DataFrame:
         return self.sql(
-            "SELECT * FROM corporate_actions WHERE date BETWEEN ? AND ? ORDER BY stock_id, date",
+            "SELECT * FROM corporate_actions WHERE date BETWEEN ? AND ? "
+            "ORDER BY stock_id, date, kind",
             [pd.Timestamp(start), pd.Timestamp(end)],
         )

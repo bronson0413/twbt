@@ -32,6 +32,17 @@ def rank_combo(scorers: Iterable[Scorer], weights: Iterable[float] | None = None
     return score
 
 
+def rank_top(scores: pd.Series, n: int) -> list[str]:
+    """The ``n`` highest scores; ties broken by stock id so results are reproducible.
+
+    Rank-averaged scores tie often, and an unstable sort would otherwise let
+    row order (e.g. from a database query) decide which stocks are held.
+    """
+    df = pd.DataFrame({"s": scores.to_numpy(), "id": scores.index.astype(str)})
+    df = df.sort_values(["s", "id"], ascending=[False, True], kind="mergesort")
+    return df["id"].head(n).tolist()
+
+
 def top_n(
     scorer: Scorer,
     n: int = 30,
@@ -45,8 +56,7 @@ def top_n(
     def strategy(ctx: Context) -> dict[str, float]:
         ok = set(eligible(ctx, min_avg_value, exclude_industries=banned))
         s = scorer(ctx)
-        picks = s[s.index.isin(ok)].sort_values(ascending=False).head(n)
-        return {sid: 1.0 / n for sid in picks.index}
+        return {sid: 1.0 / n for sid in rank_top(s[s.index.isin(ok)], n)}
 
     strategy.__name__ = name
     return strategy
