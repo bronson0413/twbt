@@ -49,12 +49,13 @@ def top_n(
     min_avg_value: float = 10_000_000,
     exclude_industries: Iterable[str] = DEFAULT_EXCLUDED_INDUSTRIES,
     name: str = "top_n",
+    top_value: int | None = None,
 ):
     """Equal-weight the ``n`` highest-scoring eligible stocks (rest in cash)."""
     banned = tuple(exclude_industries)
 
     def strategy(ctx: Context) -> dict[str, float]:
-        ok = set(eligible(ctx, min_avg_value, exclude_industries=banned))
+        ok = set(eligible(ctx, min_avg_value, exclude_industries=banned, top_value=top_value))
         s = scorer(ctx)
         return {sid: 1.0 / n for sid in rank_top(s[s.index.isin(ok)], n)}
 

@@ -126,6 +126,7 @@ def cmd_search(args: argparse.Namespace) -> int:
     cfg = SearchConfig(split=args.split, end=args.end)
     if args.n:
         cfg.n = args.n
+    cfg.top_value, cfg.select = args.top_value, args.select
     only = args.only.upper().split(",") if args.only else None
     res = run_search(Data(_data_dir(args.data_dir)), cfg, log=lambda m: print(m, flush=True),
                      only=only)
@@ -270,6 +271,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--end", help="default: last price date")
     s.add_argument("--n", type=int, help="stocks held (default: SearchConfig, 10)")
     s.add_argument("--only", help="comma-separated candidates, e.g. value,inst (quick check)")
+    s.add_argument("--top-value", type=int,
+                   help="only the N largest stocks by 120-day average traded value")
+    s.add_argument("--select", choices=["sharpe", "cagr"], default="sharpe",
+                   help="in-sample statistic the selected strategy maximizes")
     s.add_argument("--out", default="docs/strategy")
     s.set_defaults(func=cmd_search)
 

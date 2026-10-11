@@ -89,8 +89,16 @@ def eligible(
     min_avg_value: float = 10_000_000,
     value_days: int = 20,
     exclude_industries: Iterable[str] = DEFAULT_EXCLUDED_INDUSTRIES,
+    top_value: int | None = None,
+    top_value_days: int = 120,
 ) -> list[str]:
-    """Stocks a strategy may hold today: listed, liquid, quoted, allowed industry."""
+    """Stocks a strategy may hold today: listed, liquid, quoted, allowed industry.
+
+    ``top_value``: keep only the N stocks with the highest average traded value
+    over ``top_value_days`` — a stand-in for "large caps" (market value is not
+    on the FinMind free tier). The long window keeps briefly hyped small
+    stocks out.
+    """
     avg_value = ctx.value(value_days).mean()
     last_close = ctx.close(1).iloc[-1]
     industry = ctx.industry()
@@ -103,7 +111,17 @@ def eligible(
         if banned and any(b in ind for b in banned):
             continue
         out.append(s)
+    if top_value:
+        big = ctx.value(top_value_days).mean().reindex(out).fillna(0)
+        out = rank_top_ids(big, top_value)
     return out
+
+
+def rank_top_ids(values: pd.Series, n: int) -> list[str]:
+    """Ids of the ``n`` largest values, ties broken by id (reproducible)."""
+    df = pd.DataFrame({"v": values.to_numpy(), "id": values.index.astype(str)})
+    df = df.sort_values(["v", "id"], ascending=[False, True], kind="mergesort")
+    return df["id"].head(n).tolist()
 
 
 def revenue_momentum(

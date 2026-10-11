@@ -154,3 +154,27 @@ def test_inspect_runs_on_synthetic_data(search_dir):
 
     text = inspect(Data(search_dir), ["VALUE"], start="2019-01-01", end="2020-12-31")
     assert "VALUE top-30" in text and "averages per year" in text
+
+
+def test_large_cap_universe_and_cagr_selection(search_dir):
+    from twbt.engine import MarketData
+    from twbt.engine.context import Context
+    from twbt.strategies import eligible
+
+    data = Data(search_dir)
+    m = MarketData.from_data(data, "2021-01-04", "2021-06-30")
+    ctx = Context(m, len(m.dates) - 1)
+    big = eligible(ctx, 0, top_value=20)
+    assert len(big) == 20 and set(big) <= set(eligible(ctx, 0))
+
+    cfg = SearchConfig(start="2019-01-01", split="2022-01-01", end="2023-12-29", n=5,
+                       min_avg_value=0, top_value=60, select="cagr", grid_n=(5,))
+    res = run_search(data, cfg, log=lambda m: None, only=["VALUE", "LOWVOL", "INST"])
+    from twbt.research.study import curve_stats, split_curve
+    cagr = {k: curve_stats(split_curve(res.portfolios[k].equity, pd.Timestamp("2022-01-01"))[0])
+            ["cagr"] for k in ("VALUE", "LOWVOL", "INST")}
+    assert res.selected == max(cagr, key=cagr.get)
+    n = save(res, search_dir / "out_large")
+    assert n["top_value"] == 60 and n["select"] == "cagr"
+    text = (search_dir / "out_large" / "REPORT.md").read_text(encoding="utf-8")
+    assert "前 60 大" in text and "年化報酬最高" in text

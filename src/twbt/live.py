@@ -24,7 +24,8 @@ from .strategies import top_n
 
 
 def target(data: Data, strategy: str, n: int, capital: float,
-           min_avg_value: float = 10_000_000, today: str | None = None) -> dict:
+           min_avg_value: float = 10_000_000, today: str | None = None,
+           top_value: int | None = None) -> dict:
     end = str(data.sql("SELECT MAX(date) AS d FROM prices")["d"].iloc[0].date())
     today_ts = pd.Timestamp(today or pd.Timestamp.now(tz="Asia/Taipei").date())
     market = MarketData.from_data(data, end, end, benchmarks=(), revenue_end=today_ts)
@@ -32,7 +33,7 @@ def target(data: Data, strategy: str, n: int, capital: float,
     ctx = Context(market, t)
     ctx.revenue_asof = max(ctx.date, today_ts)
     scorer = candidates()[strategy]
-    weights = top_n(scorer, n, min_avg_value, name=strategy)(ctx)
+    weights = top_n(scorer, n, min_avg_value, name=strategy, top_value=top_value)(ctx)
     scores = scorer(ctx)
     close = ctx.close(1).iloc[-1]
     uni = data.sql("SELECT stock_id, stock_name, industry FROM universe").set_index("stock_id")
@@ -103,7 +104,7 @@ def run(data_dir: str | Path, results: str | Path, out: str | Path,
     res = json.loads(Path(results).read_text(encoding="utf-8"))
     strategy, n = res["selected"], int(res["n"])
     cap = capital if capital is not None else float(res.get("capital", 300_000))
-    new = target(Data(data_dir), strategy, n, cap, today=today)
+    new = target(Data(data_dir), strategy, n, cap, today=today, top_value=res.get("top_value"))
     old = None
     if previous and Path(previous).exists():
         old = json.loads(Path(previous).read_text(encoding="utf-8"))

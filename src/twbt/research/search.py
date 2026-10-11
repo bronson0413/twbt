@@ -101,6 +101,10 @@ class SearchConfig:
     capital: float = 300_000
     n: int = 10
     grid_n: tuple[int, ...] = (10, 20, 30)
+    # None = every liquid stock; N = only the N largest by 120-day traded value
+    top_value: int | None = None
+    # in-sample statistic the winner maximizes: "sharpe" or "cagr"
+    select: str = "sharpe"
     min_avg_value: float = 10_000_000
     rebalance_day: int = 11
     groups: int = 5
@@ -136,7 +140,7 @@ def run_search(data: Data, cfg: SearchConfig, log: Callable[[str], None] = print
         sigs = {k: v for k, v in sigs.items() if k in only}
 
     def universe(ctx):
-        return eligible(ctx, cfg.min_avg_value)
+        return eligible(ctx, cfg.min_avg_value, top_value=cfg.top_value)
 
     coverage = _coverage(market, schedule, universe)
     log(f"coverage of the eligible universe: {coverage}")
@@ -151,20 +155,22 @@ def run_search(data: Data, cfg: SearchConfig, log: Callable[[str], None] = print
         log(f"factor analysis {name}")
         factor[name] = factor_analysis(market, schedule, f, universe, groups=cfg.groups)
         log(f"backtest {name} top{cfg.n}")
-        portfolios[name] = bt(top_n(f, cfg.n, cfg.min_avg_value, name=name), cfg.costs)
+        portfolios[name] = bt(top_n(f, cfg.n, cfg.min_avg_value, name=name,
+                                    top_value=cfg.top_value), cfg.costs)
     log("baselines")
     portfolios["EQUAL"] = bt(equal_weight(cfg.min_avg_value), ZERO_COST)
     portfolios[BENCHMARK] = bt(buy_and_hold(BENCHMARK), cfg.costs)
 
-    ins_sharpe = {n: curve_stats(split_curve(portfolios[n].equity, split)[0])["sharpe"]
+    ins_sharpe = {n: curve_stats(split_curve(portfolios[n].equity, split)[0])[cfg.select]
                   for n in sigs}
     selected = max(ins_sharpe, key=lambda n: ins_sharpe[n])
-    log(f"selected by in-sample Sharpe: {selected} {ins_sharpe}")
+    log(f"selected by in-sample {cfg.select}: {selected} {ins_sharpe}")
     grid = {cfg.n: portfolios[selected]}
     for k in cfg.grid_n:
         if k not in grid:
             log(f"robustness {selected} top{k}")
-            grid[k] = bt(top_n(sigs[selected], k, cfg.min_avg_value, name=selected), cfg.costs)
+            grid[k] = bt(top_n(sigs[selected], k, cfg.min_avg_value, name=selected,
+                               top_value=cfg.top_value), cfg.costs)
     return SearchResult(cfg, factor, portfolios, selected, market.dates[-1], coverage, grid)
 
 
@@ -194,6 +200,7 @@ def collect(res: SearchResult) -> dict:
     out: dict = {"selected": res.selected, "split": res.cfg.split, "start": res.cfg.start,
                  "last_date": str(res.last_date.date()), "n": res.cfg.n,
                  "capital": res.cfg.capital, "coverage": res.coverage,
+                 "top_value": res.cfg.top_value, "select": res.cfg.select,
                  "n_candidates": len(res.factor), "factor": {}, "portfolio": {}}
     for name, rep in res.factor.items():
         ins, oos = split_factor(rep, split)
@@ -257,11 +264,13 @@ def render(numbers: dict) -> str:
         "",
         "> 本報告由 `twbt search` 自動產生，所有數字都直接來自資料。",
         f"> 資料期間 {n['start']} ~ {n['last_date']}；樣本外起點 {n['split']}；"
+        f"{'股票池限 120 日平均成交值前 ' + str(n['top_value']) + ' 大；' if n.get('top_value') else ''}"
         f"組合 top-{n['n']} 等權重，資金 {n['capital']:,.0f} 元。",
         "",
         "## 結論",
         "",
-        f"- 依事先訂好的規則（樣本內 top-{n['n']} 組合扣成本後 Sharpe 最高），選出 "
+        f"- 依事先訂好的規則（樣本內 top-{n['n']} 組合扣成本後"
+        f"{'年化報酬' if n.get('select') == 'cagr' else ' Sharpe '}最高），選出 "
         f"**{sel}：{LABELS[sel]}**。",
         f"- {sel} 樣本內：年化 {_pct(P[sel]['is']['cagr'])}、Sharpe {_t(P[sel]['is']['sharpe'])}、"
         f"最大回撤 {_pct(P[sel]['is']['max_dd'])}；相對全體等權重超額 "
