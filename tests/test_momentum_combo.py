@@ -62,3 +62,34 @@ def test_rank_top_breaks_ties_by_id_regardless_of_order():
     s = pd.Series({"B": 0.5, "A": 0.5, "D": 0.9, "C": 0.5})
     assert rank_top(s, 3) == ["D", "A", "B"]
     assert rank_top(s.sample(frac=1, random_state=3), 3) == ["D", "A", "B"]
+
+
+def test_buffer_keeps_holdings_still_in_band():
+    import pandas as pd
+
+    from twbt.strategies import top_n
+
+    scores = {"t0": {"A": 5, "B": 4, "C": 3, "D": 2, "E": 1},
+              "t1": {"C": 5, "D": 4, "B": 3.5, "A": 3, "E": 1}}
+
+    class Ctx:  # minimal stand-in: eligible() is bypassed by patching below
+        pass
+
+    import twbt.strategies.combo as combo
+    orig = combo.eligible
+    combo.eligible = lambda *a, **k: ["A", "B", "C", "D", "E"]
+    try:
+        cur = {"k": "t0"}
+        strat = top_n(lambda ctx: pd.Series(scores[cur["k"]], dtype=float), n=2, keep_rank=4)
+        assert set(strat(Ctx())) == {"A", "B"}
+        cur["k"] = "t1"
+        # A and B now rank 4th and 3rd: still inside the top-4 band, so both are kept
+        assert set(strat(Ctx())) == {"A", "B"}
+        no_buffer = top_n(lambda ctx: pd.Series(scores["t1"], dtype=float), n=2)
+        assert set(no_buffer(Ctx())) == {"C", "D"}
+        # live use: memory seeded from last month's holdings
+        seeded = top_n(lambda ctx: pd.Series(scores["t1"], dtype=float), n=2, keep_rank=4,
+                       held=["E", "A"])
+        assert set(seeded(Ctx())) == {"A", "C"}  # E fell out of the band, A stays
+    finally:
+        combo.eligible = orig

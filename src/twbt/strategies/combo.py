@@ -50,14 +50,32 @@ def top_n(
     exclude_industries: Iterable[str] = DEFAULT_EXCLUDED_INDUSTRIES,
     name: str = "top_n",
     top_value: int | None = None,
+    keep_rank: int | None = None,
+    held: Iterable[str] = (),
 ):
-    """Equal-weight the ``n`` highest-scoring eligible stocks (rest in cash)."""
+    """Equal-weight the ``n`` highest-scoring eligible stocks (rest in cash).
+
+    ``keep_rank``: a buffer against needless trading. A stock already held
+    stays while it still ranks within the top ``keep_rank``; only the freed
+    slots are refilled with the best-ranked stocks. The strategy remembers
+    what it picked last time (``held`` seeds that memory for live use).
+    """
     banned = tuple(exclude_industries)
+    state = {"held": list(held)}
 
     def strategy(ctx: Context) -> dict[str, float]:
         ok = set(eligible(ctx, min_avg_value, exclude_industries=banned, top_value=top_value))
         s = scorer(ctx)
-        return {sid: 1.0 / n for sid in rank_top(s[s.index.isin(ok)], n)}
+        s = s[s.index.isin(ok)]
+        if keep_rank and keep_rank > n:
+            ranked = rank_top(s, len(s))
+            band = set(ranked[:keep_rank])
+            keep = [h for h in state["held"] if h in band][:n]
+            picks = keep + [x for x in ranked if x not in keep][: n - len(keep)]
+        else:
+            picks = rank_top(s, n)
+        state["held"] = picks
+        return {sid: 1.0 / n for sid in picks}
 
     strategy.__name__ = name
     return strategy
