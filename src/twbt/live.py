@@ -25,7 +25,8 @@ from .strategies import top_n
 
 def target(data: Data, strategy: str, n: int, capital: float,
            min_avg_value: float = 10_000_000, today: str | None = None,
-           top_value: int | None = None) -> dict:
+           top_value: int | None = None, keep_rank: int | None = None,
+           held: list[str] | None = None) -> dict:
     end = str(data.sql("SELECT MAX(date) AS d FROM prices")["d"].iloc[0].date())
     today_ts = pd.Timestamp(today or pd.Timestamp.now(tz="Asia/Taipei").date())
     market = MarketData.from_data(data, end, end, benchmarks=(), revenue_end=today_ts)
@@ -33,7 +34,8 @@ def target(data: Data, strategy: str, n: int, capital: float,
     ctx = Context(market, t)
     ctx.revenue_asof = max(ctx.date, today_ts)
     scorer = candidates()[strategy]
-    weights = top_n(scorer, n, min_avg_value, name=strategy, top_value=top_value)(ctx)
+    weights = top_n(scorer, n, min_avg_value, name=strategy, top_value=top_value,
+                    keep_rank=keep_rank, held=held or ())(ctx)
     scores = scorer(ctx)
     close = ctx.close(1).iloc[-1]
     uni = data.sql("SELECT stock_id, stock_name, industry FROM universe").set_index("stock_id")
@@ -104,12 +106,18 @@ def run(data_dir: str | Path, results: str | Path, out: str | Path,
     res = json.loads(Path(results).read_text(encoding="utf-8"))
     strategy, n = res["selected"], int(res["n"])
     cap = capital if capital is not None else float(res.get("capital", 300_000))
-    new = target(Data(data_dir), strategy, n, cap, today=today, top_value=res.get("top_value"))
+    data = Data(data_dir)
+    end = str(data.sql("SELECT MAX(date) AS d FROM prices")["d"].iloc[0].date())
     old = None
     if previous and Path(previous).exists():
         old = json.loads(Path(previous).read_text(encoding="utf-8"))
-        if str(old.get("date", ""))[:7] == new["date"][:7]:
+        if str(old.get("date", ""))[:7] == end[:7]:
             old = old.get("previous")  # rerun in the same month: diff against last month
+        if old and (old.get("strategy") != strategy or int(old.get("n", 0)) != n):
+            old = None  # a different design's list was never this account's holdings
+    held = [h["stock_id"] for h in (old or {}).get("holdings", [])]
+    new = target(data, strategy, n, cap, today=today, top_value=res.get("top_value"),
+                 keep_rank=res.get("keep_rank"), held=held)
     new_saved = dict(new, previous=old and {k: v for k, v in old.items() if k != "previous"})
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)

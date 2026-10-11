@@ -40,6 +40,10 @@ on:
         description: "Run the strategy search (ten candidate signals) and publish it on `reports`"
         type: boolean
         default: false
+      plan:
+        description: "Check the live-trading design (docs/plan) against history"
+        type: boolean
+        default: false
       live:
         description: "Also write this month's orders and the holdings status"
         type: boolean
@@ -134,11 +138,16 @@ jobs:
         if: inputs.search
         run: twbt search --out data/strategy
 
+      - name: Plan check
+        if: inputs.plan
+        run: twbt plan --out data/plan
+
       - name: Monthly orders
         if: steps.mode.outputs.mode == 'orders' || inputs.live
         run: |
-          results=prev/results.json
-          [ -f data/strategy/results.json ] && results=data/strategy/results.json
+          # The owner-approved design in docs/plan decides the orders. Without it
+          # nothing is ordered: a search result alone is never traded.
+          results=docs/plan/config.json
           if [ ! -f "$results" ]; then echo "no strategy chosen yet (run the search)"; exit 0; fi
           prevarg=""; [ -f prev/latest.json ] && prevarg="--previous prev/latest.json"
           twbt live --results "$results" $prevarg --out data/live
@@ -182,7 +191,7 @@ jobs:
           # Keep what earlier runs published; replace a directory only when this
           # run produced it. live/ is merged so the monthly history accumulates.
           git fetch -q --depth 1 origin reports 2>/dev/null || true
-          for d in research strategy live; do
+          for d in research strategy plan live; do
             git archive FETCH_HEAD "$d" 2>/dev/null | tar -x -C "$dir" || true
             if [ -d "data/$d" ]; then
               [ "$d" != live ] && rm -rf "$dir/$d"

@@ -159,6 +159,15 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plan(args: argparse.Namespace) -> int:
+    from .research.plan import Plan, check, save
+
+    out = check(Data(_data_dir(args.data_dir)), Plan(), log=lambda m: print(m, flush=True))
+    save(out, args.out)
+    print(f"plan check written to {args.out}/REPORT.md")
+    return 0
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     from .engine import MarketData
     from .research.audit import impossible_moves, stock_summary
@@ -294,6 +303,10 @@ def main(argv: list[str] | None = None) -> int:
     ins.add_argument("--names", default="qv,yield,value")
     ins.add_argument("--end", help="default 2022-12-31 (in-sample only)")
     ins.set_defaults(func=cmd_inspect)
+
+    pl = sub.add_parser("plan", help="check the fixed live-trading design against history")
+    pl.add_argument("--out", default="docs/plan")
+    pl.set_defaults(func=cmd_plan)
 
     a = sub.add_parser("audit", help="find impossible price moves; spot-check stocks")
     a.add_argument("--end")

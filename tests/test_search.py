@@ -178,3 +178,59 @@ def test_large_cap_universe_and_cagr_selection(search_dir):
     assert n["top_value"] == 60 and n["select"] == "cagr"
     text = (search_dir / "out_large" / "REPORT.md").read_text(encoding="utf-8")
     assert "前 60 大" in text and "年化報酬最高" in text
+
+
+def test_plan_check_and_live_with_buffer(search_dir, tmp_path):
+    import json as _json
+
+    from twbt.live import run
+    from twbt.research.plan import Plan, check, save
+
+    plan = Plan(start="2019-01-01", split="2022-01-01", top_value=60, n=5, keep_rank=10,
+                min_avg_value=0)
+    out = check(Data(search_dir), plan, log=lambda m: None)
+    assert out["runs"]["PLAN"]["turnover"] <= out["runs"]["NO_BUFFER"]["turnover"] + 1e-9
+    save(out, tmp_path / "plan")
+    text = (tmp_path / "plan" / "REPORT.md").read_text(encoding="utf-8")
+    assert "實盤設計" in text and "nan" not in text.lower()
+    cfg = tmp_path / "plan" / "config.json"
+    first = run(search_dir, cfg, tmp_path / "live")
+    assert len(first["target"]["holdings"]) == 5
+    # last month held one of today's top-10 but not top-5: the buffer keeps it
+    from twbt.engine import MarketData
+    from twbt.engine.context import Context
+    from twbt.research.search import candidates
+    from twbt.strategies import eligible
+    data = Data(search_dir)
+    m = MarketData.from_data(data, "2023-12-29", "2023-12-29", benchmarks=())
+    ctx = Context(m, len(m.dates) - 1)
+    s = candidates()["COMBO"](ctx)
+    s = s[s.index.isin(eligible(ctx, 0, top_value=60))].sort_values(ascending=False)
+    sixth = s.index[6]
+    prev = dict(first["target"], date="2023-11-13",
+                holdings=[{"stock_id": sixth, "name": "", "industry": "", "close": 1.0,
+                           "shares": 1, "weight": 0.2, "score": 0}])
+    p = tmp_path / "prev.json"
+    p.write_text(_json.dumps(prev), encoding="utf-8")
+    second = run(search_dir, cfg, tmp_path / "live2", previous=p)
+    assert sixth in [h["stock_id"] for h in second["target"]["holdings"]]
+
+
+def test_list_from_another_strategy_is_not_treated_as_holdings(search, search_dir, tmp_path):
+    import json as _json
+
+    from twbt.live import run
+
+    _, n, out = search
+    other = {"date": "2023-11-13", "strategy": "LOWVOL", "n": n["n"], "capital": 1,
+             "holdings": [{"stock_id": "9999", "name": "", "industry": "", "close": 1.0,
+                           "shares": 1, "weight": 1.0, "score": 0}]}
+    p = tmp_path / "other.json"
+    p.write_text(_json.dumps(other), encoding="utf-8")
+    res = _json.loads((out / "results.json").read_text(encoding="utf-8"))
+    if res["selected"] == "LOWVOL":
+        res["selected"] = "VALUE"
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(_json.dumps(res), encoding="utf-8")
+    r = run(search_dir, cfg, tmp_path / "live", previous=p)
+    assert "第一次建立部位" in r["markdown"] and "9999" not in r["markdown"]

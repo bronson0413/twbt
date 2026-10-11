@@ -38,3 +38,4 @@ select = ["E", "F", "I", "B", "UP"]
 # Markdown table rows and report prose read better unwrapped.
 "src/twbt/research/report.py" = ["E501"]
 "src/twbt/research/search.py" = ["E501"]
+"src/twbt/research/plan.py" = ["E501"]
