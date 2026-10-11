@@ -17,7 +17,9 @@
 # Results go to the run's summary page and to the `reports` branch.
 #
 # Setup: Settings → Secrets and variables → Actions → New secret FINMIND_TOKEN.
-# Keep this repo private: FinMind's licence does not allow redistributing data.
+# FinMind's licence does not allow redistributing data, and this repo is public:
+# raw and clean data stay in the Actions cache only and are never uploaded or
+# committed. Only reports derived from them are published.
 
 name: data
 
@@ -212,8 +214,3 @@ jobs:
             commit -q -m "report ${{ github.run_id }} ($MODE)"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" reports
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: clean-data
-          path: data/clean
-          retention-days: 30
