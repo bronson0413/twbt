@@ -168,6 +168,15 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_replicate(args: argparse.Namespace) -> int:
+    from .research.replicate import run, save
+
+    out = run(Data(_data_dir(args.data_dir)), start=args.from_, log=lambda m: print(m, flush=True))
+    save(out, args.out)
+    print(f"written to {args.out}/REPORT.md")
+    return 0
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     from .engine import MarketData
     from .research.audit import impossible_moves, stock_summary
@@ -307,6 +316,11 @@ def main(argv: list[str] | None = None) -> int:
     pl = sub.add_parser("plan", help="check the fixed live-trading design against history")
     pl.add_argument("--out", default="docs/plan")
     pl.set_defaults(func=cmd_plan)
+
+    rp = sub.add_parser("replicate", help="FinLab monthly-revenue momentum under real conditions")
+    rp.add_argument("--from", dest="from_", default="2015-01-01")
+    rp.add_argument("--out", default="docs/replicate")
+    rp.set_defaults(func=cmd_replicate)
 
     a = sub.add_parser("audit", help="find impossible price moves; spot-check stocks")
     a.add_argument("--end")

@@ -234,3 +234,13 @@ def test_list_from_another_strategy_is_not_treated_as_holdings(search, search_di
     cfg.write_text(_json.dumps(res), encoding="utf-8")
     r = run(search_dir, cfg, tmp_path / "live", previous=p)
     assert "第一次建立部位" in r["markdown"] and "9999" not in r["markdown"]
+
+
+def test_replicate_runs_and_writes_report(search_dir, tmp_path):
+    from twbt.research.replicate import run, save
+
+    o = run(Data(search_dir), start="2019-01-01", log=lambda m: None)
+    assert set(o["runs"]) >= {"FINLAB", "NEXT_OPEN", "REALISTIC", "0050"}
+    save(o, tmp_path / "rep")
+    text = (tmp_path / "rep" / "REPORT.md").read_text(encoding="utf-8")
+    assert "重現 FinLab" in text

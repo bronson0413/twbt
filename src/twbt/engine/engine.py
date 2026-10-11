@@ -43,6 +43,15 @@ class BacktestConfig:
     # 1.0 is optimistic for bankruptcies; check the delisting events in the
     # result and rerun with 0.0 to see how much they matter.
     delist_recovery: float = 1.0
+    # Sell a holding once its total return since purchase falls below -stop_loss
+    # (checked at each close, sold at the next fill); it stays in cash until the
+    # next rebalance. None = no stop.
+    stop_loss: float | None = None
+    # "next_open": orders fill at the next day's open (realistic).
+    # "same_close": orders fill at the close of the signal day itself — what
+    # some libraries assume by default; it cannot be traded, since the close is
+    # needed to compute the signal. For comparison only.
+    fill: str = "next_open"
 
 
 @dataclass
@@ -112,6 +121,8 @@ class _Book:
         self.shares = np.zeros(len(market.ids))
         self.last_close = np.full(len(market.ids), np.nan)
         self.log: list[tuple] = []
+        # col -> (total return index on the buy day, fill price / that day's close)
+        self.entry_tri: dict[int, tuple[float, float]] = {}
 
     def record(self, date, col, side, shares, price, value, commission=0.0, tax=0.0):
         self.log.append((date, self.m.ids[col], side, float(shares), float(price), float(value),
@@ -153,10 +164,10 @@ class _Book:
             self.shares[col] = 0.0
 
     # -- step 3 -------------------------------------------------------------
-    def rebalance(self, t: int, weights: dict[str, float]) -> None:
+    def rebalance(self, t: int, weights: dict[str, float], at_close: bool = False) -> None:
         m, c, date = self.m, self.cfg.costs, self.m.dates[t]
-        o, hi, lo = m.open[t], m.high[t], m.low[t]
-        prev = self.last_close
+        o, hi, lo = (m.close[t] if at_close else m.open[t]), m.high[t], m.low[t]
+        prev = self.last_close if not at_close else self._prev_close(t)
         ref = np.where(np.isnan(o), prev, o)
         equity = self.equity(ref)
 
@@ -188,6 +199,8 @@ class _Book:
             self.cash += value - fee - tax
             self.shares[col] = target[col]
             self.record(date, col, "sell", -qty, px, value, fee, tax)
+            if target[col] == 0:
+                self.entry_tri.pop(col, None)
 
         buys = np.flatnonzero(tradable & ~locked_up & (target > self.shares))
         if len(buys) == 0:
@@ -210,6 +223,51 @@ class _Book:
             self.cash -= value + fee
             self.shares[col] += q
             self.record(date, col, "buy", q, px, value, fee)
+            ratio = c.buy_price(o[col]) / m.close[t, col] if m.close[t, col] > 0 else 1.0
+            self.entry_tri.setdefault(col, (self.m.tri[t, col], ratio))
+
+    def sell_all(self, t: int, cols: set[int], at_close: bool = False) -> set[int]:
+        """Sell every share of ``cols``; returns those that could not trade today."""
+        m, c, date = self.m, self.cfg.costs, self.m.dates[t]
+        px_row = m.close[t] if at_close else m.open[t]
+        prev = self._prev_close(t) if at_close else self.last_close
+        thr = 0.095 if date >= LIMIT_CHANGE_DATE else 0.065
+        left = set()
+        for col in cols:
+            if self.shares[col] == 0:
+                continue
+            p = px_row[col]
+            locked = (not np.isnan(p) and p == m.high[t, col] == m.low[t, col]
+                      and p <= prev[col] * (1 - thr))
+            if np.isnan(p) or p <= 0 or locked:
+                left.add(col)
+                continue
+            qty = self.shares[col]
+            sp = c.sell_price(p)
+            value = qty * sp
+            fee, tax = c.commission(value), c.tax(value, m.ids[col])
+            self.cash += value - fee - tax
+            self.shares[col] = 0.0
+            self.entry_tri.pop(col, None)
+            self.record(date, col, "stop", -qty, sp, value, fee, tax)
+        return left
+
+    def _prev_close(self, t: int) -> np.ndarray:
+        if t == 0:
+            return self.last_close
+        prev = self.m.close[t - 1]
+        return np.where(np.isnan(prev), self.last_close, prev)
+
+    def stopped(self, t: int, stop: float) -> list[int]:
+        """Holdings whose total return since purchase (at the fill price) is below -stop."""
+        out = []
+        for col, (tri0, fill_vs_close) in list(self.entry_tri.items()):
+            if self.shares[col] == 0:
+                continue
+            r = self.m.tri[t, col] / (tri0 * fill_vs_close) - 1
+            if np.isfinite(r) and r < -stop:
+                out.append(col)
+        return out
 
     # -- step 4 -------------------------------------------------------------
     def mark(self, t: int) -> float:
@@ -250,7 +308,11 @@ def run_backtest(
         today = market.close[t]
         book.last_close = np.where(np.isnan(today), book.last_close, today)
 
+    if cfg.fill not in ("next_open", "same_close"):
+        raise ValueError(f"unknown fill {cfg.fill!r}")
+    same_close = cfg.fill == "same_close"
     pending: dict[str, float] | None = None
+    exits: set[int] = set()
     signals: list[tuple[pd.Timestamp, dict[str, float]]] = []
     positions: list[dict[str, float]] = []
     equity, cash = [], []
@@ -258,16 +320,26 @@ def run_backtest(
         book.corporate_actions(t)
         book.delistings(t)
         if pending is not None:
-            book.rebalance(t, pending)
+            book.rebalance(t, pending, at_close=same_close)
             pending = None
+            exits.clear()
+        if exits:
+            exits = book.sell_all(t, exits, at_close=same_close)
+        date = market.dates[t]
+        if same_close and date in rebal:
+            target = _validate(strategy(Context(market, t)), market, date)
+            signals.append((date, target))
+            book.rebalance(t, target, at_close=True)
+            exits.clear()
+        elif date in rebal:
+            pending = _validate(strategy(Context(market, t)), market, date)
+            signals.append((date, pending))
+        if cfg.stop_loss and pending is None:
+            exits |= set(book.stopped(t, cfg.stop_loss))
         equity.append(book.mark(t))
         held = np.flatnonzero(book.shares)
         positions.append({market.ids[c]: float(book.shares[c]) for c in held})
         cash.append(book.cash)
-        date = market.dates[t]
-        if date in rebal:
-            pending = _validate(strategy(Context(market, t)), market, date)
-            signals.append((date, pending))
 
     idx = market.dates[t0:t1]
     return Result(

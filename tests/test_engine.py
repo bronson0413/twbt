@@ -234,3 +234,44 @@ def test_attribution_finds_the_mover():
     att = r.attribution(DAYS[3])
     assert att.loc[0, "stock_id"] == "A" and att.loc[0, "pnl"] == pytest.approx(100 * 5)
     assert att.loc[0, "pct_of_equity"] == pytest.approx(0.25)
+
+
+def _one_stock_market(path):
+    import numpy as np
+    import pandas as pd
+
+    from twbt.engine import MarketData
+    days = pd.bdate_range("2024-01-01", periods=len(path))
+    prices = pd.DataFrame({"date": days, "stock_id": "A", "open": path, "high": path,
+                           "low": path, "close": path, "volume": 1000, "value": 1e8})
+    uni = pd.DataFrame({"stock_id": ["A"], "industry": ["x"], "delisted_date": [pd.NaT]})
+    return days, MarketData(prices, uni, trading_days=days), np
+
+
+def test_stop_loss_sells_next_open_and_stays_out_until_rebalance():
+    from twbt.engine import BacktestConfig, run_backtest
+    from twbt.engine.costs import ZERO_COST
+
+    path = [100, 100, 95, 89, 85, 80, 120, 130]
+    days, m, _ = _one_stock_market(path)
+    cfg = BacktestConfig(capital=10_000, costs=ZERO_COST, stop_loss=0.10)
+    r = run_backtest(lambda ctx: {"A": 1.0}, m, days[0], days[-1], [days[0]], cfg)
+    stops = r.trades[r.trades["side"] == "stop"]
+    # bought at day-1 open 100; day-3 close 89 is -11% → sold at day-4 open 85
+    assert len(stops) == 1 and stops.iloc[0]["date"] == days[4]
+    assert r.equity.iloc[-1] == r.equity.iloc[4]  # in cash for the rally afterwards
+
+
+def test_same_close_fill_trades_on_the_signal_bar():
+    from twbt.engine import BacktestConfig, run_backtest
+    from twbt.engine.costs import ZERO_COST
+
+    path = [100, 200, 200]
+    days, m, _ = _one_stock_market(path)
+    common = dict(capital=10_000, costs=ZERO_COST)
+    nxt = run_backtest(lambda ctx: {"A": 1.0}, m, days[0], days[-1], [days[0]],
+                       BacktestConfig(**common))
+    same = run_backtest(lambda ctx: {"A": 1.0}, m, days[0], days[-1], [days[0]],
+                        BacktestConfig(**common, fill="same_close"))
+    assert same.equity.iloc[-1] == 20_000   # bought at 100 on the signal close
+    assert nxt.equity.iloc[-1] == 10_000    # realistic: bought at the next open, 200

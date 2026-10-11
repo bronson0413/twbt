@@ -44,6 +44,10 @@ on:
         description: "Check the live-trading design (docs/plan) against history"
         type: boolean
         default: false
+      replicate:
+        description: "Rebuild FinLab's monthly-revenue momentum under real trading conditions"
+        type: boolean
+        default: false
       live:
         description: "Also write this month's orders and the holdings status"
         type: boolean
@@ -142,6 +146,10 @@ jobs:
         if: inputs.plan
         run: twbt plan --out data/plan
 
+      - name: Replicate FinLab strategy
+        if: inputs.replicate
+        run: twbt replicate --out data/replicate
+
       - name: Monthly orders
         if: steps.mode.outputs.mode == 'orders' || inputs.live
         run: |
@@ -191,7 +199,7 @@ jobs:
           # Keep what earlier runs published; replace a directory only when this
           # run produced it. live/ is merged so the monthly history accumulates.
           git fetch -q --depth 1 origin reports 2>/dev/null || true
-          for d in research strategy plan live; do
+          for d in research strategy plan replicate live; do
             git archive FETCH_HEAD "$d" 2>/dev/null | tar -x -C "$dir" || true
             if [ -d "data/$d" ]; then
               [ "$d" != live ] && rm -rf "$dir/$d"
