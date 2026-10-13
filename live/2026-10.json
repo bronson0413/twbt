@@ -1,0 +1,100 @@
+{
+ "date": "2026-10-08",
+ "strategy": "COMBO",
+ "n": 10,
+ "revenue_asof": "2026-10-13",
+ "capital": 300000.0,
+ "holdings": [
+  {
+   "stock_id": "2408",
+   "name": "南亞科",
+   "industry": "電子工業",
+   "weight": 0.1,
+   "close": 532.0,
+   "shares": 56,
+   "score": 0.9954521134296415
+  },
+  {
+   "stock_id": "2344",
+   "name": "華邦電",
+   "industry": "電子工業",
+   "weight": 0.1,
+   "close": 177.0,
+   "shares": 169,
+   "score": 0.9882289994649545
+  },
+  {
+   "stock_id": "5289",
+   "name": "宜鼎",
+   "industry": "電腦及週邊設備業",
+   "weight": 0.1,
+   "close": 1250.0,
+   "shares": 24,
+   "score": 0.9876939539860887
+  },
+  {
+   "stock_id": "2059",
+   "name": "川湖",
+   "industry": "電子零組件業",
+   "weight": 0.1,
+   "close": 10615.0,
+   "shares": 2,
+   "score": 0.985553772070626
+  },
+  {
+   "stock_id": "3081",
+   "name": "聯亞",
+   "industry": "通信網路業",
+   "weight": 0.1,
+   "close": 2960.0,
+   "shares": 10,
+   "score": 0.9834135901551633
+  },
+  {
+   "stock_id": "3006",
+   "name": "晶豪科",
+   "industry": "電子工業",
+   "weight": 0.1,
+   "close": 267.0,
+   "shares": 112,
+   "score": 0.9834135901551632
+  },
+  {
+   "stock_id": "2337",
+   "name": "旺宏",
+   "industry": "電子工業",
+   "weight": 0.1,
+   "close": 116.0,
+   "shares": 258,
+   "score": 0.9812734082397003
+  },
+  {
+   "stock_id": "5351",
+   "name": "鈺創",
+   "industry": "半導體業",
+   "weight": 0.1,
+   "close": 115.0,
+   "shares": 260,
+   "score": 0.9756554307116105
+  },
+  {
+   "stock_id": "3167",
+   "name": "大量",
+   "industry": "電機機械",
+   "weight": 0.1,
+   "close": 1055.0,
+   "shares": 28,
+   "score": 0.9740502942750133
+  },
+  {
+   "stock_id": "2360",
+   "name": "致茂",
+   "industry": "電子工業",
+   "weight": 0.1,
+   "close": 2330.0,
+   "shares": 12,
+   "score": 0.972980203317282
+  }
+ ],
+ "previous": null
+}
