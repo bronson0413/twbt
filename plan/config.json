@@ -1,0 +1,15 @@
+{
+ "selected": "COMBO",
+ "n": 10,
+ "capital": 300000,
+ "top_value": 150,
+ "keep_rank": 20,
+ "commission_discount": 0.65,
+ "min_commission": 1.0,
+ "slippage": 0.002,
+ "min_avg_value": 10000000,
+ "rebalance_day": 11,
+ "fixed_on": "2026-10-11",
+ "start": "2012-01-01",
+ "split": "2023-01-01"
+}
